@@ -1,15 +1,8 @@
 {
   "name": "nemirtingas-epic-emulator-redux",
   "version": "1.0.0",
-  "builtin-baseline": "30ef65cad98f08e7197c9a1656fbd871bcb72f2d",
   "dependencies": [
     "protobuf",
     "nlohmann-json"
-  ],
-  "overrides": [
-    {
-      "name": "protobuf",
-      "version": "3.21.12"
-    }
   ]
 }

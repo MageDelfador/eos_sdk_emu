@@ -24,6 +24,7 @@ jobs:
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgGitCommitId: '2023.04.15' 
         env:
           VCPKG_DEFAULT_TRIPLET: ${{ matrix.arch }}-windows
 
