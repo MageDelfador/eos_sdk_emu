@@ -307,6 +307,7 @@ EOS_EResult EOSSDK_Sessions::CreateSessionModification(const EOS_Sessions_Create
 
     switch (Options->ApiVersion)
     {
+	case EOS_SESSIONS_CREATESESSIONMODIFICATION_API_005:
         case EOS_SESSIONS_CREATESESSIONMODIFICATION_API_003:
         {
             const EOS_Sessions_CreateSessionModificationOptions003* opts = reinterpret_cast<const EOS_Sessions_CreateSessionModificationOptions003*>(Options);
