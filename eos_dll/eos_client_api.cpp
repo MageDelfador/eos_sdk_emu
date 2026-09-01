@@ -150,6 +150,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Initialize(const EOS_InitializeOptions* Option
 
     switch (Options->ApiVersion)
     {
+	case 5:
         case EOS_INITIALIZE_API_004:
         {
             auto p = reinterpret_cast<const EOS_InitializeOptions004*>(Options);
