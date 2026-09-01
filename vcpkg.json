@@ -1,0 +1,8 @@
+{
+  "name": "nemirtingas-epic-emulator-redux",
+  "version": "1.0.0",
+  "dependencies": [
+    "protobuf",
+    "nlohmann-json"
+  ]
+}

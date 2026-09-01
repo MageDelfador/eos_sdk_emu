@@ -5,7 +5,7 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch: 
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,14 +20,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup vcpkg and install dependencies
+      - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-          vcpkgTriplet: '${{ matrix.arch }}-windows'
-          vcpkgArguments: 'protobuf nlohmann-json'
-          # 可选：固定 vcpkg 版本
-          # vcpkgGitCommitId: 'latest'
+        env:
+          VCPKG_DEFAULT_TRIPLET: ${{ matrix.arch }}-windows
 
       - name: Configure CMake
         shell: pwsh
