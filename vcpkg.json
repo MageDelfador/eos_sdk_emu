@@ -4,7 +4,8 @@
   "builtin-baseline": "30ef65cad98f08e7197c9a1656fbd871bcb72f2d",
   "dependencies": [
     "protobuf",
-    "nlohmann-json"
+    "nlohmann-json",
+    "abseil"
   ],
   "overrides": [
     {
