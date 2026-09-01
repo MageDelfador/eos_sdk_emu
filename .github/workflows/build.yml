@@ -38,7 +38,8 @@ jobs:
           cmake -B build -S . `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
             $arch_flag `
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} `
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 
       - name: Build
         shell: pwsh
