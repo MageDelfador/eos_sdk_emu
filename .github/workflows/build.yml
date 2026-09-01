@@ -37,6 +37,14 @@ jobs:
           $content = $content -replace 'cmake_minimum_required\s*\(VERSION\s+[0-9.]+\.{3}[0-9.]+\)', 'cmake_minimum_required(VERSION 3.15)'
           Set-Content CMakeLists.txt -Value $content
 
+      - name: Remove abseil_dll link
+        shell: pwsh
+        run: |
+          $content = Get-Content CMakeLists.txt -Raw
+          $content = $content -replace '(?m)^\s*\$<\$<BOOL:\$\{WIN32\}>:abseil_dll>\s*$', ''
+          $content = $content -replace '(?m)^\s*.*abseil_dll.*\s*$', ''
+          Set-Content CMakeLists.txt -Value $content
+
       - name: Configure CMake
         shell: pwsh
         run: |
