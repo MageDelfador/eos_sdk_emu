@@ -24,9 +24,11 @@ jobs:
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-          vcpkgGitCommitId: '501db0f17ef6df184fcdbfbe0f87cde2313b6ab1' 
+          vcpkgGitCommitId: '501db0f17ef6df184fcdbfbe0f87cde2313b6ab1'
+          doNotCache: true
         env:
           VCPKG_DEFAULT_TRIPLET: ${{ matrix.arch }}-windows
+          VCPKG_BINARY_SOURCES: 'clear'
 
       - name: Patch CMakeLists.txt minimum version
         shell: pwsh
