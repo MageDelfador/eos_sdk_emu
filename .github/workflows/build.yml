@@ -1,0 +1,57 @@
+name: Build
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch: 
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, x86]
+        build_type: [Release]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup vcpkg and install dependencies
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgTriplet: '${{ matrix.arch }}-windows'
+          vcpkgArguments: 'protobuf nlohmann-json'
+          # 可选：固定 vcpkg 版本
+          # vcpkgGitCommitId: 'latest'
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          if ("${{ matrix.arch }}" -eq "x64") {
+            $arch_flag = "-DX64=ON"
+          } else {
+            $arch_flag = "-DX86=ON"
+          }
+          cmake -B build -S . `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            $arch_flag `
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --config ${{ matrix.build_type }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.arch }}-${{ matrix.build_type }}
+          path: |
+            build/**/*.exe
+            build/**/*.dll
+            build/**/*.lib
+          if-no-files-found: warn
