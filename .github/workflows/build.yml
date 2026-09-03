@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
@@ -29,6 +31,30 @@ jobs:
           VCPKG_DEFAULT_TRIPLET: ${{ matrix.arch }}-windows-static
           VCPKG_TARGET_TRIPLET: ${{ matrix.arch }}-windows-static
           VCPKG_BINARY_SOURCES: 'clear'
+
+      - name: Patch EOS SDK if needed
+        shell: pwsh
+        run: |
+          $header = "extra/eos_sdk/eos_p2p.h"
+          if (-not (Select-String -Path $header -Pattern "EOS_P2P_PacketQueueInfo" -Quiet)) {
+            Write-Host "Adding EOS_P2P_PacketQueueInfo definition..."
+            $typeDef = @"
+
+          typedef struct EOS_P2P_PacketQueueInfo {
+              EOS_Bool bIsIncoming;
+              uint64_t IncomingPacketQueueMaxSizeBytes;
+              uint64_t IncomingPacketQueueCurrentSizeBytes;
+              uint64_t OutgoingPacketQueueMaxSizeBytes;
+              uint64_t OutgoingPacketQueueCurrentSizeBytes;
+          } EOS_P2P_PacketQueueInfo;
+          
+          "@
+            $content = Get-Content $header -Raw
+            $content = $typeDef + $content
+            Set-Content $header -Value $content
+          } else {
+            Write-Host "EOS_P2P_PacketQueueInfo already defined."
+          }
 
       - name: Configure CMake
         shell: pwsh
