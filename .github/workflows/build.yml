@@ -26,7 +26,7 @@ jobs:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
           doNotCache: true
         env:
-          VCPKG_DEFAULT_TRIPLET: ${{ matrix.arch }}-windows
+          VCPKG_DEFAULT_TRIPLET: ${{ matrix.arch }}-windows-static
           VCPKG_BINARY_SOURCES: 'clear'
 
       - name: Configure CMake
