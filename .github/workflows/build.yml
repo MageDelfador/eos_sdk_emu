@@ -32,28 +32,17 @@ jobs:
           VCPKG_TARGET_TRIPLET: ${{ matrix.arch }}-windows-static
           VCPKG_BINARY_SOURCES: 'clear'
 
-      - name: Patch EOS SDK if needed
+      - name: Patch generated stubs to include eos_p2p_types.h
         shell: pwsh
         run: |
-          $header = "extra/eos_sdk/eos_p2p.h"
-          if (-not (Select-String -Path $header -Pattern "EOS_P2P_PacketQueueInfo" -Quiet)) {
-            Write-Host "Adding EOS_P2P_PacketQueueInfo definition..."
-            $typeDef = @"
-
-          typedef struct EOS_P2P_PacketQueueInfo {
-              EOS_Bool bIsIncoming;
-              uint64_t IncomingPacketQueueMaxSizeBytes;
-              uint64_t IncomingPacketQueueCurrentSizeBytes;
-              uint64_t OutgoingPacketQueueMaxSizeBytes;
-              uint64_t OutgoingPacketQueueCurrentSizeBytes;
-          } EOS_P2P_PacketQueueInfo;
-          
-          "@
-            $content = Get-Content $header -Raw
-            $content = $typeDef + $content
-            Set-Content $header -Value $content
+          $stub = "eos_dll/eos_missing_stubs.generated.cpp"
+          $content = Get-Content $stub -Raw
+          if ($content -notmatch '#include "eos_p2p_types.h"') {
+            $content = $content -replace '#include "eos_sdk.h"', "#include `"eos_sdk.h`"`n#include `"eos_p2p_types.h`""
+            Set-Content $stub -Value $content
+            Write-Host "Added explicit include of eos_p2p_types.h"
           } else {
-            Write-Host "EOS_P2P_PacketQueueInfo already defined."
+            Write-Host "eos_p2p_types.h already included"
           }
 
       - name: Configure CMake
