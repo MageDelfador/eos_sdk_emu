@@ -31,6 +31,45 @@ namespace sdk
     static constexpr size_t max_accountid_length = EOS_EPICACCOUNTID_MAX_LENGTH + 1;
 
     static constexpr size_t max_productid_length = EOS_PRODUCTUSERID_MAX_LENGTH + 1;
+
+    // UE / game code may pass (void*)-1 as an invalid sentinel.
+    inline bool is_derefable_pointer(void const* ptr)
+    {
+        if (ptr == nullptr)
+            return false;
+
+        auto const addr = reinterpret_cast<uintptr_t>(ptr);
+        if (addr == static_cast<uintptr_t>(-1))
+            return false;
+
+#if defined(_WIN64) || defined(__x86_64__)
+        if (addr < 0x10000)
+            return false;
+#endif
+
+        return true;
+    }
+
+    inline bool is_derefable_eos_account_handle(void const* handle)
+    {
+        return is_derefable_pointer(handle);
+    }
+
+    inline bool looks_like_hex_product_user_id(std::string const& value)
+    {
+        if (value.size() != 32)
+            return false;
+
+        for (char c : value)
+        {
+            if ((c >= '0' && c <= '9') ||
+                (c >= 'a' && c <= 'f') ||
+                (c >= 'A' && c <= 'F'))
+                continue;
+            return false;
+        }
+        return true;
+    }
 }
 
 struct EOS_EpicAccountIdDetails

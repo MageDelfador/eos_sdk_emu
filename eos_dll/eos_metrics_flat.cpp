@@ -18,11 +18,13 @@
  */
 
 #include "eossdk_metrics.h"
+#include "eos_api_trace.h"
 
 using namespace sdk;
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Metrics_BeginPlayerSession(EOS_HMetrics Handle, const EOS_Metrics_BeginPlayerSessionOptions* Options)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -32,6 +34,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Metrics_BeginPlayerSession(EOS_HMetrics Handle
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Metrics_EndPlayerSession(EOS_HMetrics Handle, const EOS_Metrics_EndPlayerSessionOptions* Options)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 

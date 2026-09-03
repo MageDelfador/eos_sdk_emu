@@ -84,6 +84,9 @@ namespace sdk
             return _users.end();
         }
 
+        std::string peer_id_for_steam_id(std::string const& steam_id);
+        void request_infos_from_all_peers();
+
         //void add_session(EOS_ProductUserId session_id, std::string const& session_name);
         //void remove_session(EOS_ProductUserId session_id, std::string const& session_name);
 

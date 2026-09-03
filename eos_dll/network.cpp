@@ -18,15 +18,17 @@
  */
 
 #include "network.h"
+#include "os_funcs.h"
 
 using namespace PortableAPI;
 
 Network::Network():
     _advertise(false),
+    _network_running(false),
     _advertise_rate(2000),
-    _tcp_port(0)
+    _tcp_port(0),
+    _udp_port(0)
 {
-    //APP_LOG(Log::LogLevel::DEBUG, "");
 #if defined(NETWORK_COMPRESS)
     max_message_size = 0;
     max_compressed_message_size = 0;
@@ -34,7 +36,14 @@ Network::Network():
     _zstd_dstream = ZSTD_createDStream();
 #endif
 
-    _network_task.run(&Network::network_thread, this);
+    try
+    {
+        _network_task.run(&Network::network_thread, this);
+    }
+    catch (...)
+    {
+        APP_LOG(Log::LogLevel::WARN, "Failed to start network thread");
+    }
 }
 
 Network::~Network()
@@ -104,6 +113,11 @@ std::string Network::decompress(void const* data, size_t len)
 
 void Network::start_network()
 {
+    _network_running = false;
+
+    if (!try_init_socket())
+        return;
+
     ipv4_addr addr;
     uint16_t port;
     addr.set_any_addr();
@@ -122,11 +136,12 @@ void Network::start_network()
     }
     if (port == max_network_port)
     {
-        //APP_LOG(Log::LogLevel::ERR, "Failed to start udp socket");
+        APP_LOG(Log::LogLevel::ERR, "Failed to start udp socket");
         _network_task.stop();
     }
     else
     {
+        _udp_port = port;
         APP_LOG(Log::LogLevel::INFO, "UDP socket started on port: %hu", port);
         std::uniform_int_distribution<int64_t> dis;
         std::mt19937_64& gen = get_gen();
@@ -158,7 +173,9 @@ void Network::start_network()
         else
         {
             _tcp_port = port;
+            _network_running = true;
             APP_LOG(Log::LogLevel::INFO, "TCP socket started after %hu tries on port: %hu", x, port);
+            APP_LOG(Log::LogLevel::INFO, "Network layer build: guard40");
         }
     }
 }
@@ -286,6 +303,22 @@ void Network::add_new_tcp_client(PortableAPI::tcp_socket* cli, std::vector<peer_
         APP_LOG(Log::LogLevel::DEBUG, "Adding peer id %s to client %s", peerid.c_str(), cli->get_addr().to_string(true).c_str());
         _tcp_peers[peerid] = cli;
 
+        std::string ip;
+        try
+        {
+            ip = cli->get_addr().to_string();
+            size_t const colon = ip.find(':');
+            if (colon != std::string::npos)
+                ip = ip.substr(0, colon);
+            remember_peer_ipv4(peerid, ip);
+        }
+        catch (...)
+        {}
+
+        if (!ip.empty())
+            seed_udp_route(peerid, ip);
+        ensure_udp_route(peerid);
+
         msg.set_source_id(peerid);
 
         for (auto& channel : _default_channels)
@@ -294,12 +327,13 @@ void Network::add_new_tcp_client(PortableAPI::tcp_socket* cli, std::vector<peer_
         }
     }
 
-    adv.release_peer_connect();
-    msg.release_network_advertise();
+    (void)adv.release_peer_connect();
+    (void)msg.release_network_advertise();
     
     if(advertise_peer)
     {
-        APP_LOG(Log::LogLevel::DEBUG, "New peer: id %s %s", (*peer_ids.begin()).c_str(), cli->get_addr().to_string(true).c_str());
+        APP_LOG(Log::LogLevel::INFO, "NET TCP peer connected: id=%s endpoint=%s",
+            (*peer_ids.begin()).c_str(), cli->get_addr().to_string(true).c_str());
 
         Network_Message_pb msg;
         Network_Advertise_pb* adv = new Network_Advertise_pb;
@@ -360,8 +394,8 @@ void Network::remove_tcp_peer(tcp_buffer_t& tcp_buffer)
             ++it;
     }
 
-    adv.release_peer_disconnect();
-    msg.release_network_advertise();
+    (void)adv.release_peer_disconnect();
+    (void)msg.release_network_advertise();
 }
 
 void Network::connect_to_peer(ipv4_addr &addr, peer_t const& peer_id)
@@ -384,13 +418,13 @@ void Network::connect_to_peer(ipv4_addr &addr, peer_t const& peer_id)
         it->second.connect(addr);
         connected = true;
     }
-    catch (is_connected &e)
+    catch (is_connected&)
     {
         connected = true;
     }
-    catch (would_block &e)
+    catch (would_block&)
     {}
-    catch(in_progress &e)
+    catch(in_progress&)
     {}
     catch (std::exception &e)
     {
@@ -419,7 +453,19 @@ void Network::connect_to_peer(ipv4_addr &addr, peer_t const& peer_id)
 
         it->second.send(buff.data(), buff.length());
 
-        APP_LOG(Log::LogLevel::DEBUG, "Connected to %s : %s", it->second.get_addr().to_string(true).c_str(), peer_id.c_str());
+        APP_LOG(Log::LogLevel::INFO, "NET TCP outbound connected: peer=%s endpoint=%s",
+            peer_id.c_str(), it->second.get_addr().to_string(true).c_str());
+
+        try
+        {
+            std::string ip = addr.to_string();
+            size_t const colon = ip.find(':');
+            if (colon != std::string::npos)
+                ip = ip.substr(0, colon);
+            remember_peer_ipv4(peer_id, ip);
+        }
+        catch (...)
+        {}
 
         tcp_buffer_t tcp_buffer{};
         tcp_buffer.socket = std::move(it->second);
@@ -614,7 +660,7 @@ void Network::process_udp()
                 message_size = buff.length();
             #else
                 message = buffer.data();
-                message_size = len;
+                message_size = static_cast<int>(len);
             #endif
 
             if (msg.ParseFromArray(message, message_size))
@@ -623,6 +669,13 @@ void Network::process_udp()
                 {
                     std::lock_guard<std::recursive_mutex> lk(local_mutex);
                     _udp_addrs[msg.source_id()] = addr;
+                    {
+                        std::string ip = addr.to_string();
+                        size_t const colon = ip.find(':');
+                        if (colon != std::string::npos)
+                            ip = ip.substr(0, colon);
+                        remember_peer_ipv4(msg.source_id(), ip);
+                    }
 
                     //APP_LOG(Log::LogLevel::TRACE, "Received UDP message from: %s - %s", addr.to_string().c_str(), msg.source_id().c_str());
                     if (msg.has_network_advertise())
@@ -654,7 +707,16 @@ void Network::process_udp()
                     }
                     else
                     {
-                        //APP_LOG(Log::LogLevel::DEBUG, "Received UDP message from %s type %d", addr.to_string(true).c_str(), msg.messages_case());
+                        if (msg.has_p2p())
+                        {
+                            static std::unordered_map<std::string, bool> logged_udp_p2p;
+                            if (!logged_udp_p2p[msg.source_id()])
+                            {
+                                logged_udp_p2p[msg.source_id()] = true;
+                                APP_LOG(Log::LogLevel::INFO, "NET UDP P2P datagram from peer=%s addr=%s",
+                                    msg.source_id().c_str(), addr.to_string(true).c_str());
+                            }
+                        }
                         process_network_message(msg);
                     }
                 }
@@ -669,7 +731,7 @@ void Network::process_udp()
             }
         }
     }
-    catch (socket_exception & e)
+    catch (socket_exception&)
     {
         //APP_LOG(Log::LogLevel::WARN, "Udp socket exception: %s", e.what());
     }
@@ -684,7 +746,7 @@ void Network::process_tcp_listen()
         tcp_buff.socket.set_nonblocking(true);
         _waiting_in_tcp_clients.emplace_back(std::move(tcp_buff));
     }
-    catch (socket_exception & e)
+    catch (socket_exception& e)
     {
         APP_LOG(Log::LogLevel::WARN, "TCP Listen exception: %s", e.what());
     }
@@ -745,91 +807,105 @@ void Network::process_tcp_data(tcp_buffer_t& tcp_buffer)
 
 void Network::network_thread()
 {
-    int broadcast = 1;
-
-    start_network();
-
-    _udp_socket.setsockopt(Socket::level::sol_socket, Socket::option_name::so_broadcast, &broadcast, sizeof(broadcast));
-    //_udp_socket.set_nonblocking();
-
-    FD_ZERO(&readfds);
-    FD_ZERO(&writefds);
-    FD_ZERO(&exceptfds);
-
-    if (!_network_task.want_stop())
+    try
     {
-        FD_SET(_udp_socket.get_native_socket(), &readfds);
-        FD_SET(_tcp_socket.get_native_socket(), &readfds);
-        FD_SET(_tcp_self_recv.socket.get_native_socket(), &readfds);
+        start_network();
+        if (!_network_running)
+            return;
 
-        FD_SET(_udp_socket.get_native_socket(), &exceptfds);
-        FD_SET(_tcp_socket.get_native_socket(), &exceptfds);
-        FD_SET(_tcp_self_recv.socket.get_native_socket(), &exceptfds);
+        int broadcast = 1;
 
+        try
+        {
+            _udp_socket.setsockopt(Socket::level::sol_socket, Socket::option_name::so_broadcast, &broadcast, sizeof(broadcast));
+        }
+        catch (...)
+        {
+            stop_network();
+            return;
+        }
+
+        FD_ZERO(&readfds);
+        FD_ZERO(&writefds);
+        FD_ZERO(&exceptfds);
+
+        if (!_network_task.want_stop())
+        {
+            FD_SET(_udp_socket.get_native_socket(), &readfds);
+            FD_SET(_tcp_socket.get_native_socket(), &readfds);
+            FD_SET(_tcp_self_recv.socket.get_native_socket(), &readfds);
+
+            FD_SET(_udp_socket.get_native_socket(), &exceptfds);
+            FD_SET(_tcp_socket.get_native_socket(), &exceptfds);
+            FD_SET(_tcp_self_recv.socket.get_native_socket(), &exceptfds);
+        }
+
+        while (!_network_task.want_stop() && _network_running)
+        {
+            do_advertise();
+
+            timeval timeout;
+            timeout.tv_sec = 0;
+            timeout.tv_usec = 500000;  // 500 ms timeout
+
+            fd_set readfds_copy = readfds;
+            fd_set writefds_copy = writefds;
+            fd_set exceptfds_copy = exceptfds;
+
+            int res = select(0, &readfds_copy, &writefds_copy, &exceptfds_copy, &timeout);
+            if (res == SOCKET_ERROR) {
+                break;
+            }
+            else if (res == 0) {
+                continue;  // No events, continue the loop
+            }
+
+            if (FD_ISSET(_udp_socket.get_native_socket(), &readfds_copy)) {
+                process_udp();
+            }
+
+            if (FD_ISSET(_tcp_socket.get_native_socket(), &readfds_copy)) {
+                process_tcp_listen();
+            }
+            
+            if (FD_ISSET(_tcp_self_recv.socket.get_native_socket(), &readfds_copy))
+            {
+                try
+                {
+                    process_tcp_data(_tcp_self_recv);
+                }
+                catch (...)
+                {
+                }
+            }
+            
+            {
+                std::lock_guard<std::recursive_mutex> lk(local_mutex);
+                for (auto it = _tcp_clients.begin(); it != _tcp_clients.end();)
+                {
+                    if (FD_ISSET(it->socket.get_native_socket(), &readfds_copy)) {
+                        process_tcp_data(*it);
+                        ++it;
+                    }
+                    else if (FD_ISSET(it->socket.get_native_socket(), &exceptfds_copy)) {
+                        remove_tcp_peer(*it);
+                        it = _tcp_clients.erase(it);
+                    }
+                    else
+                        ++it;
+                }
+            }
+            
+            process_waiting_in_client();
+            process_waiting_out_clients();
+        }
     }
-
-
-
-    while (!_network_task.want_stop())
+    catch (...)
     {
-        do_advertise();
-
-        timeval timeout;
-        timeout.tv_sec = 0;
-        timeout.tv_usec = 500000;  // 500 ms timeout
-
-        fd_set readfds_copy = readfds;
-        fd_set writefds_copy = writefds;
-        fd_set exceptfds_copy = exceptfds;
-
-        int res = select(0, &readfds_copy, &writefds_copy, &exceptfds_copy, &timeout);
-        if (res == SOCKET_ERROR) {
-            break;
-        }
-        else if (res == 0) {
-            continue;  // No events, continue the loop
-        }
-
-        if (FD_ISSET(_udp_socket.get_native_socket(), &readfds_copy)) {
-            process_udp();
-        }
-
-        if (FD_ISSET(_tcp_socket.get_native_socket(), &readfds_copy)) {
-            process_tcp_listen();
-        }
-        
-        if (FD_ISSET(_tcp_self_recv.socket.get_native_socket(), &readfds_copy))
-        {
-            try
-            {
-                process_tcp_data(_tcp_self_recv); // Process our TCP message, we are not considered as a classic client as we have 2 sockets for the same peer id
-            }
-            catch (...)
-            {
-                assert(0 == 1 && "The local socket should not fail");
-            }
-        }
-        
-        {
-            std::lock_guard<std::recursive_mutex> lk(local_mutex);
-            for (auto it = _tcp_clients.begin(); it != _tcp_clients.end();)
-            {// Process the multiple tcp clients we have
-                if (FD_ISSET(it->socket.get_native_socket(), &readfds_copy)) {
-                    process_tcp_data(*it);
-                    ++it;
-                }
-                else if (FD_ISSET(it->socket.get_native_socket(), &exceptfds_copy)) {
-                    remove_tcp_peer(*it);
-                    it = _tcp_clients.erase(it);
-                }
-                else
-                    ++it;
-            }
-        }
-        
-        process_waiting_in_client();
-        // We might have found a peer while he didn't find us yet, so begin the connection procedure
-        process_waiting_out_clients();
+        _network_running = false;
+#if defined(__WINDOWS__)
+        OutputDebugStringA("NemirtingasEpicEmu: network_thread failed\n");
+#endif
     }
 }
 
@@ -933,6 +1009,67 @@ bool Network::CBRunFrame(channel_t channel, Network_Message_pb::MessagesCase Mes
     return rerun;
 }
 
+namespace
+{
+    struct custom_broadcast_range_t
+    {
+        uint32_t start_ip;
+        uint32_t end_ip;
+        uint32_t broadcast_ip;
+        bool valid;
+    };
+
+    custom_broadcast_range_t parse_custom_broadcast(std::string const& spec)
+    {
+        custom_broadcast_range_t range{ 0, 0, 0, false };
+        if (spec.empty())
+            return range;
+
+        size_t const slash = spec.find('/');
+        PortableAPI::ipv4_addr addr;
+
+        if (slash == std::string::npos)
+        {
+            if (!addr.from_string(spec))
+                return range;
+
+            uint32_t const ip = addr.get_ip();
+            range.start_ip = ip & 0xffffff00u;
+            range.end_ip = range.start_ip | 0xffu;
+            range.broadcast_ip = range.end_ip;
+            range.valid = true;
+            return range;
+        }
+
+        std::string const ip_part = spec.substr(0, slash);
+        std::string const prefix_part = spec.substr(slash + 1);
+        if (ip_part.empty() || prefix_part.empty() || !addr.from_string(ip_part))
+            return range;
+
+        char* end = nullptr;
+        unsigned long const prefix = std::strtoul(prefix_part.c_str(), &end, 10);
+        if (end == prefix_part.c_str() || *end != '\0' || prefix > 32)
+            return range;
+
+        if (prefix == 0)
+        {
+            range.start_ip = 0;
+            range.end_ip = 0xffffffffu;
+            range.broadcast_ip = 0xffffffffu;
+            range.valid = true;
+            return range;
+        }
+
+        uint32_t const mask = (~0u << (32 - static_cast<unsigned>(prefix)));
+        uint32_t const network = addr.get_ip() & mask;
+        range.start_ip = network;
+        range.end_ip = network | ~mask;
+        range.broadcast_ip = range.end_ip;
+        range.valid = true;
+        return range;
+    }
+}
+
 bool Network::SendBroadcast(Network_Message_pb& msg)
 {
     std::lock_guard<std::recursive_mutex> lk(local_mutex);
@@ -957,26 +1094,34 @@ bool Network::SendBroadcast(Network_Message_pb& msg)
 #endif
 
     if (!Settings::Inst().custom_broadcast.empty()) {
-        ipv4_addr addr;
-        for (uint16_t port = network_port; port < max_network_port; ++port) {
-            addr.set_port(port);
-            addr.from_string(Settings::Inst().custom_broadcast);
-            for (uint16_t addr_lo = 0; addr_lo < 255; ++addr_lo) {
-                addr.set_ip( (addr.get_ip() & 0xffffff00) | addr_lo );
+        custom_broadcast_range_t const range = parse_custom_broadcast(Settings::Inst().custom_broadcast);
+        if (!range.valid)
+        {
+            APP_LOG(Log::LogLevel::WARN, "Invalid custom_broadcast: %s", Settings::Inst().custom_broadcast.c_str());
+        }
+        else
+        {
+            ipv4_addr dest;
+            dest.set_ip(range.broadcast_ip);
+            APP_LOG(Log::LogLevel::DEBUG, "custom_broadcast: %s -> %s",
+                Settings::Inst().custom_broadcast.c_str(),
+                dest.to_string().c_str());
+
+            for (uint16_t port = network_port; port < max_network_port; ++port)
+            {
+                dest.set_port(port);
                 try
                 {
-                    _udp_socket.sendto(addr, buffer.data(), buffer.length());
-                    //APP_LOG(Log::LogLevel::TRACE, "Send broadcast");
+                    _udp_socket.sendto(dest, buffer.data(), buffer.length());
                 }
-                catch (socket_exception& e)
+                catch (socket_exception&)
                 {
-                    //APP_LOG(Log::LogLevel::WARN, "Udp socket exception: %s", e.what());
                     return false;
                 }
             }
-        }
 
-        return true;
+            return true;
+        }
     }
 
     for (auto& brd : broadcasts)
@@ -989,7 +1134,7 @@ bool Network::SendBroadcast(Network_Message_pb& msg)
                 _udp_socket.sendto(brd, buffer.data(), buffer.length());
                 //APP_LOG(Log::LogLevel::TRACE, "Send broadcast");
             }
-            catch (socket_exception & e)
+            catch (socket_exception&)
             {
                 //APP_LOG(Log::LogLevel::WARN, "Udp socket exception: %s", e.what());
                 return false;
@@ -1032,13 +1177,112 @@ std::set<Network::peer_t> Network::UDPSendToAllPeers(Network_Message_pb& msg)
             peers_sent_to.insert(peer_infos.first);
             //APP_LOG(Log::LogLevel::TRACE, "Sent message to %s", peer_infos.second.to_string().c_str());
         }
-        catch (socket_exception & e)
+        catch (socket_exception&)
         {
             //APP_LOG(Log::LogLevel::WARN, "Udp socket exception: %s on %s", e.what(), peer_infos.second.to_string().c_str());
         }
     });
 
     return peers_sent_to;
+}
+
+void Network::seed_udp_route(peer_t const& peer_id, std::string const& ip)
+{
+    if (peer_id.empty() || ip.empty())
+        return;
+
+    std::lock_guard<std::recursive_mutex> lk(local_mutex);
+
+    if (_udp_addrs.find(peer_id) != _udp_addrs.end())
+        return;
+
+    ipv4_addr addr;
+    if (!addr.from_string(ip))
+        return;
+
+    addr.set_port(network_port);
+    _udp_addrs[peer_id] = addr;
+    APP_LOG(Log::LogLevel::INFO, "NET UDP route seeded: peer=%s -> %s:%hu",
+        peer_id.c_str(), ip.c_str(), network_port);
+}
+
+void Network::ensure_udp_route(peer_t const& peer_id)
+{
+    if (peer_id.empty() || _udp_port == 0 || _my_peer_ids.empty())
+        return;
+
+    std::lock_guard<std::recursive_mutex> lk(local_mutex);
+
+    if (_udp_addrs.find(peer_id) != _udp_addrs.end())
+        return;
+
+    std::string ip;
+    auto cache_it = _peer_ipv4_cache.find(peer_id);
+    if (cache_it != _peer_ipv4_cache.end() && !cache_it->second.empty())
+        ip = cache_it->second;
+
+    if (ip.empty())
+    {
+        auto tcp_it = _tcp_peers.find(peer_id);
+        if (tcp_it != _tcp_peers.end() && tcp_it->second != nullptr)
+        {
+            try
+            {
+                ip = tcp_it->second->get_addr().to_string();
+                size_t const colon = ip.find(':');
+                if (colon != std::string::npos)
+                    ip = ip.substr(0, colon);
+            }
+            catch (...)
+            {}
+        }
+    }
+
+    if (ip.empty())
+        return;
+
+    ipv4_addr peer_ip;
+    if (!peer_ip.from_string(ip))
+        return;
+
+    Network_Message_pb poke;
+    poke.set_source_id(*_my_peer_ids.begin());
+    poke.set_dest_id(peer_id);
+    poke.set_game_id(Settings::Inst().network_game_id());
+    poke.set_timestamp(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count());
+
+    Network_Advertise_pb* advertise = new Network_Advertise_pb;
+    Network_Port_pb* port_pb = new Network_Port_pb;
+    port_pb->set_port(_udp_port);
+    advertise->set_allocated_port(port_pb);
+    poke.set_allocated_network_advertise(advertise);
+
+    std::string buffer;
+    poke.SerializeToString(&buffer);
+#if defined(NETWORK_COMPRESS)
+    buffer = std::move(compress(buffer.data(), buffer.length()));
+#endif
+
+    ipv4_addr dest = peer_ip;
+    for (uint16_t port = network_port; port < max_network_port; ++port)
+    {
+        dest.set_port(port);
+        try
+        {
+            _udp_socket.sendto(dest, buffer.data(), buffer.length());
+        }
+        catch (...)
+        {}
+    }
+
+    APP_LOG(Log::LogLevel::DEBUG, "UDP route poke sent to %s (%s) on ports %hu-%hu",
+        peer_id.c_str(), ip.c_str(), network_port, static_cast<uint16_t>(max_network_port - 1));
+
+    ipv4_addr seeded;
+    seeded.set_ip(peer_ip.get_ip());
+    seeded.set_port(network_port);
+    _udp_addrs[peer_id] = seeded;
 }
 
 bool Network::UDPSendTo(Network_Message_pb& msg)
@@ -1050,7 +1294,6 @@ bool Network::UDPSendTo(Network_Message_pb& msg)
     auto it = _udp_addrs.find(msg.dest_id());
     if (it == _udp_addrs.end())
     {
-        //APP_LOG(Log::LogLevel::ERR, "No route to %llu", msg.dest_id());
         return false;
     }
 
@@ -1074,7 +1317,7 @@ bool Network::UDPSendTo(Network_Message_pb& msg)
         _udp_socket.sendto(it->second, buffer.data(), buffer.length());
         //APP_LOG(Log::LogLevel::DEBUG, "Sent message to peer_id: %s, addr: %s", msg.dest_id().c_str(), it->second.to_string().c_str());
     }
-    catch (socket_exception & e)
+    catch (socket_exception&)
     {
         //APP_LOG(Log::LogLevel::WARN, "Udp socket exception: %s on %s", e.what(), it->second.to_string().c_str());
         return false;
@@ -1096,6 +1339,9 @@ std::set<Network::peer_t> Network::TCPSendToAllPeers(Network_Message_pb& msg)
 
     std::for_each(_tcp_peers.begin(), _tcp_peers.end(), [&](std::pair<peer_t const, tcp_socket*>& client)
     {
+        if (client.second == &_tcp_self_send)
+            return;
+
         msg.set_dest_id(client.first);
         msg.set_timestamp(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
 
@@ -1121,7 +1367,7 @@ std::set<Network::peer_t> Network::TCPSendToAllPeers(Network_Message_pb& msg)
             peers_sent_to.insert(client.first);
             //APP_LOG(Log::LogLevel::TRACE, "Sent message to %s", peer_infos.second.to_string().c_str());
         }
-        catch (socket_exception & e)
+        catch (socket_exception&)
         {
             //APP_LOG(Log::LogLevel::WARN, "Tcp socket exception: %s on %s", e.what(), client.second->get_addr().to_string().c_str());
         }
@@ -1169,11 +1415,155 @@ bool Network::TCPSendTo(Network_Message_pb& msg)
         it->second->send(buffer.data(), buffer.length());
         //APP_LOG(Log::LogLevel::TRACE, "Sent message to %s", it->second->get_addr().to_string());
     }
-    catch (socket_exception & e)
+    catch (socket_exception&)
     {
         //APP_LOG(Log::LogLevel::WARN, "Tcp socket exception: %s on %s", e.what(), it->second->get_addr().to_string().c_str());
         return false;
     }
 
     return true;
+}
+
+bool Network::SendToPeer(Network_Message_pb& msg)
+{
+    if (TCPSendTo(msg))
+        return true;
+
+    return UDPSendTo(msg);
+}
+
+bool Network::has_tcp_peer(peer_t const& peer_id)
+{
+    std::lock_guard<std::recursive_mutex> lk(local_mutex);
+    return _tcp_peers.find(peer_id) != _tcp_peers.end();
+}
+
+void Network::remember_peer_ipv4(peer_t const& peer_id, std::string const& ip)
+{
+    if (peer_id.empty() || ip.empty())
+        return;
+
+    std::lock_guard<std::recursive_mutex> lk(local_mutex);
+    _peer_ipv4_cache[peer_id] = ip;
+}
+
+bool Network::try_get_peer_ipv4(peer_t const& peer_id, std::string& out_ip)
+{
+    std::lock_guard<std::recursive_mutex> lk(local_mutex);
+
+    auto cache_it = _peer_ipv4_cache.find(peer_id);
+    if (cache_it != _peer_ipv4_cache.end() && !cache_it->second.empty())
+    {
+        out_ip = cache_it->second;
+        return true;
+    }
+
+    auto udp_it = _udp_addrs.find(peer_id);
+    if (udp_it != _udp_addrs.end())
+    {
+        out_ip = udp_it->second.to_string();
+        size_t const colon = out_ip.find(':');
+        if (colon != std::string::npos)
+            out_ip = out_ip.substr(0, colon);
+        if (!out_ip.empty())
+        {
+            _peer_ipv4_cache[peer_id] = out_ip;
+            return true;
+        }
+    }
+
+    auto tcp_it = _tcp_peers.find(peer_id);
+    if (tcp_it != _tcp_peers.end() && tcp_it->second != nullptr)
+    {
+        try
+        {
+            out_ip = tcp_it->second->get_addr().to_string();
+            size_t const colon = out_ip.find(':');
+            if (colon != std::string::npos)
+                out_ip = out_ip.substr(0, colon);
+            if (!out_ip.empty())
+            {
+                _peer_ipv4_cache[peer_id] = out_ip;
+                return true;
+            }
+        }
+        catch (...)
+        {}
+    }
+
+    for (auto const& waiting : _waiting_out_tcp_clients)
+    {
+        if (waiting.first == peer_id)
+        {
+            try
+            {
+                out_ip = waiting.second.socket.get_addr().to_string();
+                size_t const colon = out_ip.find(':');
+                if (colon != std::string::npos)
+                    out_ip = out_ip.substr(0, colon);
+                if (!out_ip.empty())
+                {
+                    _peer_ipv4_cache[peer_id] = out_ip;
+                    return true;
+                }
+            }
+            catch (...)
+            {}
+        }
+    }
+
+    return false;
+}
+
+std::string Network::format_peer_endpoint(peer_t const& peer_id)
+{
+    if (peer_id.empty())
+        return "no-peer";
+
+    std::lock_guard<std::recursive_mutex> lk(local_mutex);
+
+    std::string ip;
+    auto cache_it = _peer_ipv4_cache.find(peer_id);
+    if (cache_it != _peer_ipv4_cache.end() && !cache_it->second.empty())
+        ip = cache_it->second;
+
+    auto tcp_it = _tcp_peers.find(peer_id);
+    bool const tcp_connected = tcp_it != _tcp_peers.end() && tcp_it->second != nullptr;
+
+    if (ip.empty() && tcp_connected)
+    {
+        try
+        {
+            ip = tcp_it->second->get_addr().to_string();
+            size_t const colon = ip.find(':');
+            if (colon != std::string::npos)
+                ip = ip.substr(0, colon);
+        }
+        catch (...)
+        {}
+    }
+
+    if (ip.empty())
+    {
+        auto udp_it = _udp_addrs.find(peer_id);
+        if (udp_it != _udp_addrs.end())
+        {
+            ip = udp_it->second.to_string();
+            size_t const colon = ip.find(':');
+            if (colon != std::string::npos)
+                ip = ip.substr(0, colon);
+        }
+    }
+
+    if (ip.empty())
+        return tcp_connected ? "ip=unknown via=TCP" : "ip=unknown via=none";
+
+    if (tcp_connected)
+        return ip + " via=TCP";
+
+    auto udp_it = _udp_addrs.find(peer_id);
+    if (udp_it != _udp_addrs.end())
+        return ip + " via=UDP";
+
+    return ip + " via=TCP-pending";
 }

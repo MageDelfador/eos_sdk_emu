@@ -18,9 +18,11 @@
  */
 
 #include "eossdk_userinfo.h"
+#include "eos_api_trace.h"
 
 EOS_DECLARE_FUNC(void) EOS_UserInfo_QueryUserInfo(EOS_HUserInfo Handle, const EOS_UserInfo_QueryUserInfoOptions* Options, void* ClientData, const EOS_UserInfo_OnQueryUserInfoCallback CompletionDelegate)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return;
 
@@ -30,6 +32,7 @@ EOS_DECLARE_FUNC(void) EOS_UserInfo_QueryUserInfo(EOS_HUserInfo Handle, const EO
 
 EOS_DECLARE_FUNC(void) EOS_UserInfo_QueryUserInfoByDisplayName(EOS_HUserInfo Handle, const EOS_UserInfo_QueryUserInfoByDisplayNameOptions* Options, void* ClientData, const EOS_UserInfo_OnQueryUserInfoByDisplayNameCallback CompletionDelegate)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return;
 
@@ -52,6 +55,7 @@ EOS_DECLARE_FUNC(void) EOS_UserInfo_QueryUserInfoByDisplayName(EOS_HUserInfo Han
  */
 EOS_DECLARE_FUNC(void) EOS_UserInfo_QueryUserInfoByExternalAccount(EOS_HUserInfo Handle, const EOS_UserInfo_QueryUserInfoByExternalAccountOptions* Options, void* ClientData, const EOS_UserInfo_OnQueryUserInfoByExternalAccountCallback CompletionDelegate)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return;
 
@@ -61,6 +65,7 @@ EOS_DECLARE_FUNC(void) EOS_UserInfo_QueryUserInfoByExternalAccount(EOS_HUserInfo
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_UserInfo_CopyUserInfo(EOS_HUserInfo Handle, const EOS_UserInfo_CopyUserInfoOptions* Options, void** OutUserInfo)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -68,8 +73,67 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_UserInfo_CopyUserInfo(EOS_HUserInfo Handle, co
     return pInst->CopyUserInfo(Options, OutUserInfo);
 }
 
+EOS_DECLARE_FUNC(EOS_EResult) EOS_UserInfo_CopyBestDisplayName(EOS_HUserInfo Handle, const EOS_UserInfo_CopyBestDisplayNameOptions* Options, EOS_UserInfo_BestDisplayName** OutBestDisplayName)
+{
+    EOS_API_TRACE();
+    if (Handle == nullptr)
+        return EOS_EResult::EOS_InvalidParameters;
+
+    auto pInst = reinterpret_cast<sdk::EOSSDK_UserInfo*>(Handle);
+    return pInst->CopyBestDisplayName(Options, OutBestDisplayName);
+}
+
+EOS_DECLARE_FUNC(EOS_EResult) EOS_UserInfo_CopyBestDisplayNameWithPlatform(EOS_HUserInfo Handle, const EOS_UserInfo_CopyBestDisplayNameWithPlatformOptions* Options, EOS_UserInfo_BestDisplayName** OutBestDisplayName)
+{
+    EOS_API_TRACE();
+    if (Handle == nullptr)
+        return EOS_EResult::EOS_InvalidParameters;
+
+    auto pInst = reinterpret_cast<sdk::EOSSDK_UserInfo*>(Handle);
+    return pInst->CopyBestDisplayNameWithPlatform(Options, OutBestDisplayName);
+}
+
+EOS_DECLARE_FUNC(EOS_OnlinePlatformType) EOS_UserInfo_GetLocalPlatformType(EOS_HUserInfo Handle, const EOS_UserInfo_GetLocalPlatformTypeOptions* Options)
+{
+    EOS_API_TRACE();
+    if (Handle == nullptr)
+        return EOS_OPT_Unknown;
+
+    auto pInst = reinterpret_cast<sdk::EOSSDK_UserInfo*>(Handle);
+    return pInst->GetLocalPlatformType(Options);
+}
+
+namespace
+{
+void release_cstr(const char* value)
+{
+    delete[] value;
+}
+
+void release_userinfo002(EOS_UserInfo002* infos)
+{
+    if (infos == nullptr)
+        return;
+
+    release_cstr(infos->Country);
+    release_cstr(infos->PreferredLanguage);
+    release_cstr(infos->DisplayName);
+    release_cstr(infos->Nickname);
+}
+
+void release_userinfo003(EOS_UserInfo003* infos)
+{
+    if (infos == nullptr)
+        return;
+
+    release_userinfo002(reinterpret_cast<EOS_UserInfo002*>(infos));
+    release_cstr(infos->DisplayNameSanitized);
+}
+}
+
 EOS_DECLARE_FUNC(uint32_t) EOS_UserInfo_GetExternalUserInfoCount(EOS_HUserInfo Handle, const EOS_UserInfo_GetExternalUserInfoCountOptions* Options)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return 0;
 
@@ -79,6 +143,7 @@ EOS_DECLARE_FUNC(uint32_t) EOS_UserInfo_GetExternalUserInfoCount(EOS_HUserInfo H
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_UserInfo_CopyExternalUserInfoByIndex(EOS_HUserInfo Handle, const EOS_UserInfo_CopyExternalUserInfoByIndexOptions* Options, EOS_UserInfo_ExternalUserInfo** OutExternalUserInfo)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -88,6 +153,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_UserInfo_CopyExternalUserInfoByIndex(EOS_HUser
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_UserInfo_CopyExternalUserInfoByAccountType(EOS_HUserInfo Handle, const EOS_UserInfo_CopyExternalUserInfoByAccountTypeOptions* Options, EOS_UserInfo_ExternalUserInfo** OutExternalUserInfo)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -97,6 +163,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_UserInfo_CopyExternalUserInfoByAccountType(EOS
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_UserInfo_CopyExternalUserInfoByAccountId(EOS_HUserInfo Handle, const EOS_UserInfo_CopyExternalUserInfoByAccountIdOptions* Options, EOS_UserInfo_ExternalUserInfo** OutExternalUserInfo)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -106,20 +173,53 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_UserInfo_CopyExternalUserInfoByAccountId(EOS_H
 
 EOS_DECLARE_FUNC(void) EOS_UserInfo_Release(EOS_UserInfo* UserInfo)
 {
+    EOS_API_TRACE();
     TRACE_FUNC();
 
     if (UserInfo != nullptr)
     {
-        delete UserInfo;
+        switch (UserInfo->ApiVersion)
+        {
+            case EOS_USERINFO_COPYUSERINFO_API_003:
+                release_userinfo003(reinterpret_cast<EOS_UserInfo003*>(UserInfo));
+                delete reinterpret_cast<EOS_UserInfo003*>(UserInfo);
+                break;
+            case EOS_USERINFO_COPYUSERINFO_API_002:
+            case EOS_USERINFO_COPYUSERINFO_API_001:
+                release_userinfo002(reinterpret_cast<EOS_UserInfo002*>(UserInfo));
+                delete reinterpret_cast<EOS_UserInfo002*>(UserInfo);
+                break;
+            default:
+                delete UserInfo;
+                break;
+        }
+    }
+}
+
+EOS_DECLARE_FUNC(void) EOS_UserInfo_BestDisplayName_Release(EOS_UserInfo_BestDisplayName* BestDisplayName)
+{
+    EOS_API_TRACE();
+    TRACE_FUNC();
+
+    if (BestDisplayName != nullptr)
+    {
+        release_cstr(BestDisplayName->DisplayName);
+        release_cstr(BestDisplayName->DisplayNameSanitized);
+        release_cstr(BestDisplayName->Nickname);
+        delete BestDisplayName;
     }
 }
 
 EOS_DECLARE_FUNC(void) EOS_UserInfo_ExternalUserInfo_Release(EOS_UserInfo_ExternalUserInfo* ExternalUserInfo)
 {
+    EOS_API_TRACE();
     TRACE_FUNC();
 
     if (ExternalUserInfo != nullptr)
     {
+        release_cstr(ExternalUserInfo->AccountId);
+        release_cstr(ExternalUserInfo->DisplayName);
+        release_cstr(ExternalUserInfo->DisplayNameSanitized);
         delete ExternalUserInfo;
     }
 }

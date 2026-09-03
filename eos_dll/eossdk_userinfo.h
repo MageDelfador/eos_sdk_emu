@@ -54,6 +54,11 @@ namespace sdk
         void QueryUserInfoByDisplayName(const EOS_UserInfo_QueryUserInfoByDisplayNameOptions* Options, void* ClientData, const EOS_UserInfo_OnQueryUserInfoByDisplayNameCallback CompletionDelegate);
         void QueryUserInfoByExternalAccount(const EOS_UserInfo_QueryUserInfoByExternalAccountOptions* Options, void* ClientData, const EOS_UserInfo_OnQueryUserInfoByExternalAccountCallback CompletionDelegate);
         EOS_EResult CopyUserInfo(const EOS_UserInfo_CopyUserInfoOptions* Options, void** OutUserInfo);
+        EOS_EResult CopyBestDisplayName(const EOS_UserInfo_CopyBestDisplayNameOptions* Options, EOS_UserInfo_BestDisplayName** OutBestDisplayName);
+        EOS_EResult CopyBestDisplayNameWithPlatform(const EOS_UserInfo_CopyBestDisplayNameWithPlatformOptions* Options, EOS_UserInfo_BestDisplayName** OutBestDisplayName);
+        EOS_OnlinePlatformType GetLocalPlatformType(const EOS_UserInfo_GetLocalPlatformTypeOptions* Options);
+        void cache_userinfo_from_connect(EOS_EpicAccountId userid, Connect_Infos_pb const& infos);
+        UserInfo_Info_pb* resolve_userinfo(EOS_EpicAccountId userid);
         uint32_t GetExternalUserInfoCount(const EOS_UserInfo_GetExternalUserInfoCountOptions* Options);
         EOS_EResult CopyExternalUserInfoByIndex(const EOS_UserInfo_CopyExternalUserInfoByIndexOptions* Options, EOS_UserInfo_ExternalUserInfo** OutExternalUserInfo);
         EOS_EResult CopyExternalUserInfoByAccountType(const EOS_UserInfo_CopyExternalUserInfoByAccountTypeOptions* Options, EOS_UserInfo_ExternalUserInfo** OutExternalUserInfo);

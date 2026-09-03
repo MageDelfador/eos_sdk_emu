@@ -23,6 +23,8 @@
 #include "callback_manager.h"
 #include "network.h"
 
+#include <optional>
+
 namespace sdk
 {
     class EOSSDK_Sessions;
@@ -71,10 +73,13 @@ namespace sdk
         std::mutex _local_mutex;
 
         bool                       _released;
+        bool                       _search_broadcast_sent;
         Sessions_Search_pb         _search_infos;
         std::list<Session_Infos_pb> _results;
         pFrameResult_t             _search_cb;
         std::set<std::string>      _search_peers;
+
+        void search_local();
 
     public:
         EOSSDK_SessionSearch();
@@ -124,14 +129,20 @@ namespace sdk
     {
         friend class sdk::EOSSDK_Sessions;
 
+        static uint32_t constexpr k_magic = 0xAC71701Eu;
+        uint32_t _magic = k_magic;
         std::string _session_name;
         Session_Infos_pb _infos;
 
     public:
+        bool              is_valid() const { return _magic == k_magic; }
         EOS_EResult       CopyInfo(const EOS_ActiveSession_CopyInfoOptions* Options, EOS_ActiveSession_Info** OutActiveSessionInfo);
         uint32_t          GetRegisteredPlayerCount(const EOS_ActiveSession_GetRegisteredPlayerCountOptions* Options);
         EOS_ProductUserId GetRegisteredPlayerByIndex(const EOS_ActiveSession_GetRegisteredPlayerByIndexOptions* Options);
         void              Release();
+
+    private:
+        Session_Infos_pb resolve_live_infos() const;
     };
 
     struct session_state_t
@@ -152,16 +163,45 @@ namespace sdk
         Session_Infos_pb infos;
     };
 
+    struct pending_session_search_t
+    {
+        Network::peer_t peer_id;
+        Sessions_Search_pb search;
+        std::chrono::steady_clock::time_point created;
+    };
+
+    struct steam_bridge_session_pending_t
+    {
+        std::string lobby_id;
+        Lobby_Infos_pb lobby_infos;
+        Network::peer_t host_peer;
+        Network::peer_t expected_session_host;
+        std::chrono::steady_clock::time_point created;
+    };
+
     class EOSSDK_Sessions :
         public IRunCallback,
         public IRunNetwork
     {
 
         static constexpr auto join_timeout = std::chrono::milliseconds(5000);
+        static constexpr auto pending_session_search_timeout = std::chrono::milliseconds(10000);
+        static constexpr auto steam_bridge_session_search_timeout = std::chrono::milliseconds(15000);
         // key: session_id
         std::unordered_map<std::string, pFrameResult_t> _sessions_join;
         std::list<session_invite_t>           _session_invites;
         std::list<EOSSDK_SessionSearch*>      _session_searchs;
+        std::list<pending_session_search_t>   _pending_session_searches;
+        std::unordered_map<int32_t, steam_bridge_session_pending_t> _steam_bridge_session_pending;
+        int32_t _next_steam_bridge_session_search_id{ 2000000000 };
+        std::optional<Session_Infos_pb> _steam_bridge_pending_auto_join;
+        std::string _steam_bridge_auto_join_session_id;
+
+        void queue_pending_session_search(Network::peer_t const& peer_id, Sessions_Search_pb const& search);
+        void flush_pending_session_searches();
+        void expire_pending_session_searches();
+        void expire_steam_bridge_session_searches();
+        bool on_steam_bridge_session_search_response(Network_Message_pb const& msg, Sessions_Search_response_pb const& resp);
 
     public:
         EOSSDK_Sessions();
@@ -170,15 +210,30 @@ namespace sdk
         std::unordered_map<std::string, session_state_t> _sessions;
 
         session_state_t* get_session_by_name(std::string const& session_name);
+        session_state_t* get_primary_session_for_id(std::string const& session_id);
         session_state_t* get_session_by_id(std::string const& session_id);
         bool session_match_from_attributes(session_state_t* session, google::protobuf::Map<std::string, Session_Search_Parameter> const& parameters);
         std::vector<session_state_t*> get_sessions_from_attributes(google::protobuf::Map<std::string, Session_Search_Parameter> const& parameters);
+        void sync_session_from_lobby(Lobby_Infos_pb const& lobby);
+        void sync_lobby_members_to_sessions(Lobby_Infos_pb const& lobby);
+        bool try_get_session_infos_for_search(std::string const& session_id, Session_Infos_pb& out, bool allow_stale_redirect = true);
+        void prune_stale_sessions(std::string const& active_lobby_id);
+        void prepare_session_infos_for_network(Session_Infos_pb& infos);
+        void register_discovered_session(Session_Infos_pb infos);
+        void fix_session_host_from_peer(Session_Infos_pb& infos, std::string const& peer_id);
+        void notify_join_session_accepted(Session_Infos_pb const& infos);
+        void on_steam_bridge_party_joined();
+        void attempt_steam_bridge_auto_session_join(Session_Infos_pb session);
+        bool send_steam_bridge_session_search(Network::peer_t const& host_peer, std::string const& lobby_id, Lobby_Infos_pb const& lobby_infos, int32_t bridge_search_id);
+        std::string resolve_session_host_address_for_copy(Session_Infos_pb const& infos, std::string const& peer_hint = {});
+        void fill_sessions_search_response(Sessions_Search_response_pb* resp, Sessions_Search_pb const& search, bool allow_stale_redirect = true);
         void add_player_to_session(std::string const& player, session_state_t* session);
         void remove_player_from_session(std::string const& player, session_state_t* session);
         bool register_player_to_session(std::string const& player, session_state_t *session);
         bool unregister_player_from_session(std::string const& player, session_state_t* session);
         bool is_player_in_session(std::string const& player, session_state_t* session);
         bool is_player_registered(std::string const& player, session_state_t *session);
+        bool local_user_hosts_session_for_peer(std::string const& peer_product_id) const;
 
         // Send Network messages
         bool send_to_all_members(Network_Message_pb & msg, session_state_t *session);
@@ -238,5 +293,8 @@ namespace sdk
         EOS_EResult        CopySessionHandleForPresence(const EOS_Sessions_CopySessionHandleForPresenceOptions* Options, EOS_HSessionDetails* OutSessionHandle);
         EOS_EResult        IsUserInSession(const EOS_Sessions_IsUserInSessionOptions* Options);
         EOS_EResult        DumpSessionState(const EOS_Sessions_DumpSessionStateOptions* Options);
+        bool               local_player_in_game_session(std::string const& session_id = {});
     };
+
+    EOS_ProductUserId owner_user_id_for_session_infos(Session_Infos_pb const& infos);
 }

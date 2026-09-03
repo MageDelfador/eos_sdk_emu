@@ -18,10 +18,107 @@
  */
 
 #include "eossdk_lobby.h"
+#include "eossdk_platform.h"
 #include "eos_client_api.h"
+#include "eos_memory.h"
 
 namespace sdk
 {
+namespace
+{
+Lobby_Infos_pb patched_lobby_infos_for_read(Lobby_Infos_pb const& infos)
+{
+    Lobby_Infos_pb copy = infos;
+    GetEOS_Lobby().prepare_lobby_infos_for_unity(copy);
+    GetEOS_Lobby().patch_crossplatform_joinable_lobby(copy);
+    return copy;
+}
+
+static Lobby_Member_Infos_pb const* find_lobby_member_by_product_user_id(
+    google::protobuf::Map<std::string, Lobby_Member_Infos_pb> const& members,
+    EOS_ProductUserId target_user_id)
+{
+    if (target_user_id == nullptr)
+        return nullptr;
+
+    for (auto const& member : members)
+    {
+        if (GetProductUserId(member.first) == target_user_id)
+            return &member.second;
+    }
+    return nullptr;
+}
+
+template<typename AttrEntry>
+EOS_Lobby_Attribute* allocate_lobby_attribute_from_entry(AttrEntry const& attr_entry)
+{
+    EOS_Lobby_Attribute* pAttribute = eos_allocate_struct<EOS_Lobby_Attribute>();
+    EOS_Lobby_AttributeData* pData = eos_allocate_struct<EOS_Lobby_AttributeData>();
+    if (pAttribute == nullptr || pData == nullptr)
+    {
+        eos_release_bytes(pData);
+        eos_release_bytes(pAttribute);
+        return nullptr;
+    }
+
+    pData->Key = eos_allocate_c_string(attr_entry.first);
+    if (pData->Key == nullptr)
+    {
+        eos_release_bytes(pData);
+        eos_release_bytes(pAttribute);
+        return nullptr;
+    }
+
+    switch (attr_entry.second.value().value_case())
+    {
+        case Lobby_Attr_Value::ValueCase::kB:
+            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_BOOLEAN;
+            pData->Value.AsBool = attr_entry.second.value().b() ? EOS_TRUE : EOS_FALSE;
+            break;
+
+        case Lobby_Attr_Value::ValueCase::kD:
+            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_DOUBLE;
+            pData->Value.AsDouble = attr_entry.second.value().d();
+            break;
+
+        case Lobby_Attr_Value::ValueCase::kI:
+            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_INT64;
+            pData->Value.AsInt64 = attr_entry.second.value().i();
+            break;
+
+        case Lobby_Attr_Value::ValueCase::kS:
+        {
+            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_STRING;
+            pData->Value.AsUtf8 = eos_allocate_c_string(attr_entry.second.value().s());
+            if (pData->Value.AsUtf8 == nullptr)
+            {
+                eos_release_bytes(const_cast<char*>(pData->Key));
+                eos_release_bytes(pData);
+                eos_release_bytes(pAttribute);
+                return nullptr;
+            }
+        }
+        break;
+
+        default:
+            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_STRING;
+            pData->Value.AsUtf8 = eos_allocate_c_string("");
+            if (pData->Value.AsUtf8 == nullptr)
+            {
+                eos_release_bytes(const_cast<char*>(pData->Key));
+                eos_release_bytes(pData);
+                eos_release_bytes(pAttribute);
+                return nullptr;
+            }
+            break;
+    }
+
+    pAttribute->ApiVersion = EOS_LOBBY_ATTRIBUTE_API_LATEST;
+    pAttribute->Data = pData;
+    pAttribute->Visibility = static_cast<EOS_ELobbyAttributeVisibility>(attr_entry.second.visibility_type());
+    return pAttribute;
+}
+}
 
 EOSSDK_LobbyDetails::EOSSDK_LobbyDetails()
 {}
@@ -76,33 +173,41 @@ EOS_EResult EOSSDK_LobbyDetails::CopyInfo(const EOS_LobbyDetails_CopyInfoOptions
         return EOS_EResult::EOS_InvalidParameters;
     }
 
-    EOS_LobbyDetails_Info* pLobbyDetailsInfos = new EOS_LobbyDetails_Info;
+    Lobby_Infos_pb infos = patched_lobby_infos_for_read(_state.infos);
+    EOS_LobbyDetails_Info* pLobbyDetailsInfos = eos_allocate_struct<EOS_LobbyDetails_Info>();
+    if (pLobbyDetailsInfos == nullptr)
+    {
+        *OutLobbyDetailsInfo = nullptr;
+        return EOS_EResult::EOS_UnexpectedError;
+    }
 
     pLobbyDetailsInfos->ApiVersion = EOS_LOBBYDETAILS_INFO_API_LATEST;
+    pLobbyDetailsInfos->LobbyId = eos_allocate_c_string(infos.lobby_id());
+    pLobbyDetailsInfos->BucketId = eos_allocate_c_string(infos.bucket_id());
+    pLobbyDetailsInfos->LobbyOwnerUserId = GetProductUserId(infos.owner_id());
+    pLobbyDetailsInfos->PermissionLevel = static_cast<EOS_ELobbyPermissionLevel>(infos.permission_level());
     {
-        size_t len = _state.infos.lobby_id().length() + 1;
-        char* str = new char[len];
-        strncpy(str, _state.infos.lobby_id().c_str(), len);
-        pLobbyDetailsInfos->LobbyId = str;
-
-        len = _state.infos.bucket_id().length() + 1;
-        str = new char[len];
-        strncpy(str, _state.infos.bucket_id().c_str(), len);
-        pLobbyDetailsInfos->BucketId = str;
+        uint32_t const member_count = GetEOS_Lobby().lobby_member_count_for_read(infos);
+        pLobbyDetailsInfos->AvailableSlots = infos.max_lobby_member() > member_count
+            ? infos.max_lobby_member() - member_count
+            : 0;
     }
-    
-    pLobbyDetailsInfos->LobbyOwnerUserId = GetProductUserId(_state.infos.owner_id());
-    pLobbyDetailsInfos->PermissionLevel = (EOS_ELobbyPermissionLevel)_state.infos.permission_level();
-    pLobbyDetailsInfos->AvailableSlots = _state.infos.max_lobby_member() - _state.infos.members_size();
-    pLobbyDetailsInfos->MaxMembers = _state.infos.max_lobby_member();
-    pLobbyDetailsInfos->bAllowInvites = EOS_TRUE;
-    pLobbyDetailsInfos->bAllowHostMigration = EOS_TRUE;
-    pLobbyDetailsInfos->bRTCRoomEnabled = EOS_TRUE;
-    pLobbyDetailsInfos->bAllowJoinById = EOS_TRUE;
-    pLobbyDetailsInfos->bRejoinAfterKickRequiresInvite = EOS_TRUE;
-    pLobbyDetailsInfos->bPresenceEnabled = EOS_TRUE;
+    pLobbyDetailsInfos->MaxMembers = infos.max_lobby_member();
+    pLobbyDetailsInfos->bAllowInvites = infos.invites_allowed() ? EOS_TRUE : EOS_FALSE;
+    pLobbyDetailsInfos->bAllowHostMigration = infos.ballowhostmigration() ? EOS_TRUE : EOS_FALSE;
+    pLobbyDetailsInfos->bRTCRoomEnabled = infos.brtcroomenabled() ? EOS_TRUE : EOS_FALSE;
+    pLobbyDetailsInfos->bAllowJoinById = infos.ballowjoinbyid() ? EOS_TRUE : EOS_FALSE;
+    pLobbyDetailsInfos->bRejoinAfterKickRequiresInvite = infos.brejoinafterkickrequiresinvite() ? EOS_TRUE : EOS_FALSE;
+    pLobbyDetailsInfos->bPresenceEnabled = infos.bpresenceenabled() ? EOS_TRUE : EOS_FALSE;
     pLobbyDetailsInfos->AllowedPlatformIds = NULL;
     pLobbyDetailsInfos->AllowedPlatformIdsCount = 0;
+
+    if (pLobbyDetailsInfos->LobbyId == nullptr || pLobbyDetailsInfos->BucketId == nullptr)
+    {
+        EOS_LobbyDetails_Info_Release(pLobbyDetailsInfos);
+        *OutLobbyDetailsInfo = nullptr;
+        return EOS_EResult::EOS_UnexpectedError;
+    }
 
     *OutLobbyDetailsInfo = pLobbyDetailsInfos;
     return EOS_EResult::EOS_Success;
@@ -122,7 +227,8 @@ uint32_t EOSSDK_LobbyDetails::GetAttributeCount(const EOS_LobbyDetails_GetAttrib
     if (Options == nullptr)
         return 0;
 
-    return _state.infos.attributes_size();
+    Lobby_Infos_pb infos = patched_lobby_infos_for_read(_state.infos);
+    return infos.attributes_size();
 }
 
 /**
@@ -144,61 +250,29 @@ EOS_EResult EOSSDK_LobbyDetails::CopyAttributeByIndex(const EOS_LobbyDetails_Cop
 {
     TRACE_FUNC();
 
-    if (Options == nullptr || Options->AttrIndex >= _state.infos.attributes_size() || OutAttribute == nullptr)
+    if (Options == nullptr || OutAttribute == nullptr)
     {
         set_nullptr(OutAttribute);
         return EOS_EResult::EOS_InvalidParameters;
     }
 
-    auto attr_it = _state.infos.attributes().begin();
+    Lobby_Infos_pb infos = patched_lobby_infos_for_read(_state.infos);
+
+    if (Options->AttrIndex >= static_cast<uint32_t>(infos.attributes_size()))
+    {
+        set_nullptr(OutAttribute);
+        return EOS_EResult::EOS_InvalidParameters;
+    }
+
+    auto attr_it = infos.attributes().begin();
     std::advance(attr_it, Options->AttrIndex);
 
-    EOS_Lobby_Attribute* pAttribute = new EOS_Lobby_Attribute;
-    EOS_Lobby_AttributeData* pData = new EOS_Lobby_AttributeData;
-    
+    EOS_Lobby_Attribute* pAttribute = allocate_lobby_attribute_from_entry(*attr_it);
+    if (pAttribute == nullptr)
     {
-        size_t len = attr_it->first.length() + 1;
-        char* str = new char[len];
-        strncpy(str, attr_it->first.c_str(), len);
-        pData->Key = str;
+        set_nullptr(OutAttribute);
+        return EOS_EResult::EOS_UnexpectedError;
     }
-    
-    switch (attr_it->second.value().value_case())
-    {
-        case Session_Attr_Value::ValueCase::kB: 
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_BOOLEAN;
-            pData->Value.AsBool = attr_it->second.value().b();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kD:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_DOUBLE;
-            pData->Value.AsDouble = attr_it->second.value().d();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kI:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_INT64;
-            pData->Value.AsInt64 = attr_it->second.value().i();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kS:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_STRING;
-            std::string const& value = attr_it->second.value().s();
-            char* str = new char[value.length() + 1];
-            strncpy(str, value.c_str(), value.length() + 1);
-            pData->Value.AsUtf8 = str;
-        }
-    }
-
-    pAttribute->ApiVersion = EOS_LOBBYDETAILS_COPYINFO_API_LATEST;
-    pAttribute->Data = pData;
-    pAttribute->Visibility = (EOS_ELobbyAttributeVisibility)attr_it->second.visibility_type();
 
     *OutAttribute = pAttribute;
 
@@ -230,59 +304,20 @@ EOS_EResult EOSSDK_LobbyDetails::CopyAttributeByKey(const EOS_LobbyDetails_CopyA
         return EOS_EResult::EOS_InvalidParameters;
     }
 
-    auto attr_it = _state.infos.attributes().find(Options->AttrKey);
-    if (attr_it == _state.infos.attributes().end())
+    Lobby_Infos_pb infos = patched_lobby_infos_for_read(_state.infos);
+    auto attr_it = infos.attributes().find(Options->AttrKey);
+    if (attr_it == infos.attributes().end())
     {
         *OutAttribute = nullptr;
         return EOS_EResult::EOS_InvalidParameters;
     }
 
-    EOS_Lobby_Attribute* pAttribute = new EOS_Lobby_Attribute;
-    EOS_Lobby_AttributeData* pData = new EOS_Lobby_AttributeData;
-
+    EOS_Lobby_Attribute* pAttribute = allocate_lobby_attribute_from_entry(*attr_it);
+    if (pAttribute == nullptr)
     {
-        size_t len = attr_it->first.length() + 1;
-        char* str = new char[len];
-        strncpy(str, attr_it->first.c_str(), len);
-        pData->Key = str;
+        set_nullptr(OutAttribute);
+        return EOS_EResult::EOS_UnexpectedError;
     }
-    
-    switch (attr_it->second.value().value_case())
-    {
-        case Session_Attr_Value::ValueCase::kB: 
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_BOOLEAN;
-            pData->Value.AsBool = attr_it->second.value().b();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kD:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_DOUBLE;
-            pData->Value.AsDouble = attr_it->second.value().d();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kI:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_INT64;
-            pData->Value.AsInt64 = attr_it->second.value().i();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kS:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_STRING;
-            std::string const& value = attr_it->second.value().s();
-            char* str = new char[value.length() + 1];
-            strncpy(str, value.c_str(), value.length() + 1);
-            pData->Value.AsUtf8 = str;
-        }
-    }
-
-    pAttribute->ApiVersion = EOS_LOBBYDETAILS_COPYINFO_API_LATEST;
-    pAttribute->Data = pData;
-    pAttribute->Visibility = (EOS_ELobbyAttributeVisibility)attr_it->second.visibility_type();
 
     *OutAttribute = pAttribute;
 
@@ -303,7 +338,8 @@ uint32_t EOSSDK_LobbyDetails::GetMemberCount(const EOS_LobbyDetails_GetMemberCou
     if (Options == nullptr)
         return 0;
 
-    return _state.infos.members_size();
+    Lobby_Infos_pb infos = patched_lobby_infos_for_read(_state.infos);
+    return GetEOS_Lobby().lobby_member_count_for_read(infos);
 }
 
 /**
@@ -320,13 +356,11 @@ EOS_ProductUserId EOSSDK_LobbyDetails::GetMemberByIndex(const EOS_LobbyDetails_G
 {
     TRACE_FUNC();
 
-    if (Options == nullptr || Options->MemberIndex >= _state.infos.members_size())
+    if (Options == nullptr)
         return GetInvalidProductUserId();
 
-    auto member_it = _state.infos.members().begin();
-    std::advance(member_it, Options->MemberIndex);
-
-    return GetProductUserId(member_it->first);
+    Lobby_Infos_pb infos = patched_lobby_infos_for_read(_state.infos);
+    return GetEOS_Lobby().lobby_member_by_index(infos, Options->MemberIndex);
 }
 
 /**
@@ -346,11 +380,12 @@ uint32_t EOSSDK_LobbyDetails::GetMemberAttributeCount(const EOS_LobbyDetails_Get
     if (Options == nullptr || Options->TargetUserId == nullptr)
         return 0;
 
-    auto members_it = _state.infos.members().find(Options->TargetUserId->to_string());
-    if (members_it == _state.infos.members().end())
+    Lobby_Infos_pb infos = patched_lobby_infos_for_read(_state.infos);
+    Lobby_Member_Infos_pb const* member = find_lobby_member_by_product_user_id(infos.members(), Options->TargetUserId);
+    if (member == nullptr)
         return 0;
 
-    return members_it->second.attributes_size();
+    return member->attributes_size();
 }
 
 /**
@@ -378,62 +413,29 @@ EOS_EResult EOSSDK_LobbyDetails::CopyMemberAttributeByIndex(const EOS_LobbyDetai
         return EOS_EResult::EOS_InvalidParameters;
     }
 
-    auto members_it = _state.infos.members().find(Options->TargetUserId->to_string());
-    if (members_it == _state.infos.members().end())
+    Lobby_Infos_pb infos = patched_lobby_infos_for_read(_state.infos);
+    Lobby_Member_Infos_pb const* member = find_lobby_member_by_product_user_id(infos.members(), Options->TargetUserId);
+    if (member == nullptr)
     {
         *OutAttribute = nullptr;
         return EOS_EResult::EOS_InvalidParameters;
     }
 
-    auto attr_it = members_it->second.attributes().begin();
+    if (Options->AttrIndex >= static_cast<uint32_t>(member->attributes_size()))
+    {
+        *OutAttribute = nullptr;
+        return EOS_EResult::EOS_InvalidParameters;
+    }
+
+    auto attr_it = member->attributes().begin();
     std::advance(attr_it, Options->AttrIndex);
 
-    EOS_Lobby_Attribute* pAttribute = new EOS_Lobby_Attribute;
-    EOS_Lobby_AttributeData* pData = new EOS_Lobby_AttributeData;
-
+    EOS_Lobby_Attribute* pAttribute = allocate_lobby_attribute_from_entry(*attr_it);
+    if (pAttribute == nullptr)
     {
-        size_t len = attr_it->first.length() + 1;
-        char* str = new char[len];
-        strncpy(str, attr_it->first.c_str(), len);
-        pData->Key = str;
+        *OutAttribute = nullptr;
+        return EOS_EResult::EOS_UnexpectedError;
     }
-
-    switch (attr_it->second.value().value_case())
-    {
-        case Session_Attr_Value::ValueCase::kB:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_BOOLEAN;
-            pData->Value.AsBool = attr_it->second.value().b();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kD:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_DOUBLE;
-            pData->Value.AsDouble = attr_it->second.value().d();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kI:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_INT64;
-            pData->Value.AsInt64 = attr_it->second.value().i();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kS:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_STRING;
-            std::string const& value = attr_it->second.value().s();
-            char* str = new char[value.length() + 1];
-            strncpy(str, value.c_str(), value.length() + 1);
-            pData->Value.AsUtf8 = str;
-        }
-    }
-
-    pAttribute->ApiVersion = EOS_LOBBYDETAILS_COPYINFO_API_LATEST;
-    pAttribute->Data = pData;
-    pAttribute->Visibility = (EOS_ELobbyAttributeVisibility)attr_it->second.visibility_type();
 
     *OutAttribute = pAttribute;
 
@@ -465,66 +467,27 @@ EOS_EResult EOSSDK_LobbyDetails::CopyMemberAttributeByKey(const EOS_LobbyDetails
         return EOS_EResult::EOS_InvalidParameters;
     }
 
-    auto members_it = _state.infos.members().find(Options->TargetUserId->to_string());
-    if (members_it == _state.infos.members().end())
+    Lobby_Infos_pb infos = patched_lobby_infos_for_read(_state.infos);
+    Lobby_Member_Infos_pb const* member = find_lobby_member_by_product_user_id(infos.members(), Options->TargetUserId);
+    if (member == nullptr)
     {
         *OutAttribute = nullptr;
         return EOS_EResult::EOS_InvalidParameters;
     }
 
-    auto attr_it = members_it->second.attributes().find(Options->AttrKey);
-    if (attr_it == members_it->second.attributes().end())
+    auto attr_it = member->attributes().find(Options->AttrKey);
+    if (attr_it == member->attributes().end())
     {
         *OutAttribute = nullptr;
         return EOS_EResult::EOS_InvalidParameters;
     }
 
-    EOS_Lobby_Attribute* pAttribute = new EOS_Lobby_Attribute;
-    EOS_Lobby_AttributeData* pData = new EOS_Lobby_AttributeData;
-
+    EOS_Lobby_Attribute* pAttribute = allocate_lobby_attribute_from_entry(*attr_it);
+    if (pAttribute == nullptr)
     {
-        size_t len = attr_it->first.length() + 1;
-        char* str = new char[len];
-        strncpy(str, attr_it->first.c_str(), len);
-        pData->Key = str;
+        *OutAttribute = nullptr;
+        return EOS_EResult::EOS_UnexpectedError;
     }
-
-    switch (attr_it->second.value().value_case())
-    {
-        case Session_Attr_Value::ValueCase::kB:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_BOOLEAN;
-            pData->Value.AsBool = attr_it->second.value().b();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kD:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_DOUBLE;
-            pData->Value.AsDouble = attr_it->second.value().d();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kI:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_INT64;
-            pData->Value.AsInt64 = attr_it->second.value().i();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kS:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_STRING;
-            std::string const& value = attr_it->second.value().s();
-            char* str = new char[value.length() + 1];
-            strncpy(str, value.c_str(), value.length() + 1);
-            pData->Value.AsUtf8 = str;
-        }
-    }
-
-    pAttribute->ApiVersion = EOS_LOBBYDETAILS_COPYINFO_API_LATEST;
-    pAttribute->Data = pData;
-    pAttribute->Visibility = (EOS_ELobbyAttributeVisibility)attr_it->second.visibility_type();
 
     *OutAttribute = pAttribute;
 

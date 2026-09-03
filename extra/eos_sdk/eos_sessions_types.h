@@ -8,7 +8,7 @@
 enum { k_iSessionsCallbackBase = 12000 };
 // next free callback_id: k_iSessionsCallbackBase + 14
 
-#define EOS_Sessions_CreateSessionModificationOptions           EOS_Sessions_CreateSessionModificationOptions004
+#define EOS_Sessions_CreateSessionModificationOptions           EOS_Sessions_CreateSessionModificationOptions005
 #define EOS_Sessions_UpdateSessionModificationOptions           EOS_Sessions_UpdateSessionModificationOptions001
 #define EOS_Sessions_SendInviteOptions                          EOS_Sessions_SendInviteOptions001
 #define EOS_Sessions_RejectInviteOptions                        EOS_Sessions_RejectInviteOptions001
@@ -44,8 +44,8 @@ enum { k_iSessionsCallbackBase = 12000 };
 #define EOS_SessionSearch_SetTargetUserIdOptions                EOS_SessionSearch_SetTargetUserIdOptions001
 #define EOS_SessionSearch_SetParameterOptions                   EOS_SessionSearch_SetParameterOptions001
 #define EOS_SessionSearch_RemoveParameterOptions                EOS_SessionSearch_RemoveParameterOptions001
-#define EOS_SessionDetails_Settings                             EOS_SessionDetails_Settings003
-#define EOS_SessionDetails_Info                                 EOS_SessionDetails_Info001
+#define EOS_SessionDetails_Settings                             EOS_SessionDetails_Settings004
+#define EOS_SessionDetails_Info                                 EOS_SessionDetails_Info002
 #define EOS_SessionDetails_CopyInfoOptions                      EOS_SessionDetails_CopyInfoOptions001
 #define EOS_SessionDetails_GetSessionAttributeCountOptions      EOS_SessionDetails_GetSessionAttributeCountOptions001
 #define EOS_SessionDetails_CopySessionAttributeByIndexOptions   EOS_SessionDetails_CopySessionAttributeByIndexOptions001
@@ -65,13 +65,14 @@ enum { k_iSessionsCallbackBase = 12000 };
  * Input parameters for the EOS_Sessions_CopySessionHandleByUiEventId Function.
  */
 
+#include <eos_sessions_types1.19.0.h>
 #include <eos_sessions_types1.14.2.h>
 #include <eos_sessions_types1.13.0.h>
 #include <eos_sessions_types1.7.1.h>
 #include <eos_sessions_types1.5.0.h>
 #include <eos_sessions_types1.3.1.h>
 
-#define EOS_SESSIONS_CREATESESSIONMODIFICATION_API_LATEST           EOS_SESSIONS_CREATESESSIONMODIFICATION_API_004
+#define EOS_SESSIONS_CREATESESSIONMODIFICATION_API_LATEST           EOS_SESSIONS_CREATESESSIONMODIFICATION_API_005
 #define EOS_SESSIONS_UPDATESESSIONMODIFICATION_API_LATEST           EOS_SESSIONS_UPDATESESSIONMODIFICATION_API_001
 #define EOS_SESSIONS_SENDINVITE_API_LATEST                          EOS_SESSIONS_SENDINVITE_API_001
 #define EOS_SESSIONS_REJECTINVITE_API_LATEST                        EOS_SESSIONS_REJECTINVITE_API_001
@@ -107,8 +108,8 @@ enum { k_iSessionsCallbackBase = 12000 };
 #define EOS_SESSIONSEARCH_SETTARGETUSERID_API_LATEST                EOS_SESSIONSEARCH_SETTARGETUSERID_API_001
 #define EOS_SESSIONSEARCH_SETPARAMETER_API_LATEST                   EOS_SESSIONSEARCH_SETPARAMETER_API_001
 #define EOS_SESSIONSEARCH_REMOVEPARAMETER_API_LATEST                EOS_SESSIONSEARCH_REMOVEPARAMETER_API_001
-#define EOS_SESSIONDETAILS_SETTINGS_API_LATEST                      EOS_SESSIONDETAILS_SETTINGS_API_003
-#define EOS_SESSIONDETAILS_INFO_API_LATEST                          EOS_SESSIONDETAILS_INFO_API_001
+#define EOS_SESSIONDETAILS_SETTINGS_API_LATEST                      EOS_SESSIONDETAILS_SETTINGS_API_004
+#define EOS_SESSIONDETAILS_INFO_API_LATEST                          EOS_SESSIONDETAILS_INFO_API_002
 #define EOS_SESSIONDETAILS_COPYINFO_API_LATEST                      EOS_SESSIONDETAILS_COPYINFO_API_001
 #define EOS_SESSIONDETAILS_GETSESSIONATTRIBUTECOUNT_API_LATEST      EOS_SESSIONDETAILS_GETSESSIONATTRIBUTECOUNT_API_001
 #define EOS_SESSIONDETAILS_COPYSESSIONATTRIBUTEBYINDEX_API_LATEST   EOS_SESSIONDETAILS_COPYSESSIONATTRIBUTEBYINDEX_API_001

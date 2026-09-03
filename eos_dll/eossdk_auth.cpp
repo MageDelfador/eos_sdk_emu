@@ -107,25 +107,29 @@ void EOSSDK_Auth::Login(const EOS_Auth_LoginOptions* Options, void* ClientData, 
 
             case EOS_AUTH_LOGIN_API_001:
             {
-                APP_LOG(Log::LogLevel::DEBUG, "Credentials ApiVersion = %u", Options->Credentials->ApiVersion);
-                switch (Options->Credentials->ApiVersion)
+                if (Options->Credentials != nullptr)
                 {
-                    case EOS_AUTH_CREDENTIALS_API_003:
+                    APP_LOG(Log::LogLevel::DEBUG, "Credentials ApiVersion = %u", Options->Credentials->ApiVersion);
+                    switch (Options->Credentials->ApiVersion)
                     {
-                        auto* v = reinterpret_cast<const EOS_Auth_Credentials003*>(Options->Credentials);
-                        APP_LOG(Log::LogLevel::DEBUG, "SystemAuthCredentialsOptions = %p", v->SystemAuthCredentialsOptions);
-                        APP_LOG(Log::LogLevel::DEBUG, "ExternalType                 = %d", v->ExternalType);
-                    }
-                    case EOS_AUTH_CREDENTIALS_API_002:
-                    {
-                        auto* v = reinterpret_cast<const EOS_Auth_Credentials002*>(Options->Credentials);
-                    }
-                    case EOS_AUTH_CREDENTIALS_API_001:
-                    {
-                        auto* v = reinterpret_cast<const EOS_Auth_Credentials001*>(Options->Credentials);
-                        APP_LOG(Log::LogLevel::DEBUG, "Id                           = %s", v->Id == nullptr ? "null" : v->Id);
-                        APP_LOG(Log::LogLevel::DEBUG, "Token                        = %s", v->Token == nullptr ? "null" : v->Token);
-                        APP_LOG(Log::LogLevel::DEBUG, "Type                         = %u", v->Type);
+                        case EOS_AUTH_CREDENTIALS_API_003:
+                        {
+                            auto* v = reinterpret_cast<const EOS_Auth_Credentials003*>(Options->Credentials);
+                            APP_LOG(Log::LogLevel::DEBUG, "SystemAuthCredentialsOptions = %p", v->SystemAuthCredentialsOptions);
+                            APP_LOG(Log::LogLevel::DEBUG, "ExternalType                 = %d", v->ExternalType);
+                        }
+                        case EOS_AUTH_CREDENTIALS_API_002:
+                        {
+                            auto* v = reinterpret_cast<const EOS_Auth_Credentials002*>(Options->Credentials);
+                            (void)v;
+                        }
+                        case EOS_AUTH_CREDENTIALS_API_001:
+                        {
+                            auto* v = reinterpret_cast<const EOS_Auth_Credentials001*>(Options->Credentials);
+                            APP_LOG(Log::LogLevel::DEBUG, "Id                           = %s", v->Id == nullptr ? "null" : v->Id);
+                            APP_LOG(Log::LogLevel::DEBUG, "Token                        = %s", v->Token == nullptr ? "null" : v->Token);
+                            APP_LOG(Log::LogLevel::DEBUG, "Type                         = %u", v->Type);
+                        }
                     }
                 }
             }
@@ -398,9 +402,9 @@ EOS_EResult EOSSDK_Auth::CopyUserAuthToken(const EOS_Auth_CopyUserAuthTokenOptio
         token->ExpiresIn = std::chrono::duration_cast<std::chrono::milliseconds>(_access_expires - chrono_now).count() / 1000.0;
         {
             char* str = new char[64];
-            now += token->ExpiresIn;
+            now += static_cast<time_t>(token->ExpiresIn);
             strftime(str, 64, "%FT%T.000Z", gmtime(&now));
-            now -= token->ExpiresIn;
+            now -= static_cast<time_t>(token->ExpiresIn);
             token->ExpiresAt = str;
         }
 
@@ -414,7 +418,7 @@ EOS_EResult EOSSDK_Auth::CopyUserAuthToken(const EOS_Auth_CopyUserAuthTokenOptio
         token->RefreshExpiresIn = std::chrono::duration_cast<std::chrono::milliseconds>(_refresh_expires - chrono_now).count() / 1000.0;
         {
             char* str = new char[64];
-            now += token->RefreshExpiresIn;
+            now += static_cast<time_t>(token->RefreshExpiresIn);
             strftime(str, 64, "%FT%T.000Z", gmtime(&now));
             token->RefreshExpiresAt = str;
         }

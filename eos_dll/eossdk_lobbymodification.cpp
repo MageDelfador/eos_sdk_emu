@@ -96,7 +96,7 @@ EOS_EResult EOSSDK_LobbyModification::SetMaxMembers(const EOS_LobbyModification_
     TRACE_FUNC();
     std::lock_guard<std::mutex> lk(_local_mutex);
 
-    if (Options == nullptr || Options->MaxMembers < _infos.members_size() || Options->MaxMembers > EOS_LOBBY_MAX_LOBBY_MEMBERS)
+    if (Options == nullptr || Options->MaxMembers < static_cast<uint32_t>(_infos.members_size()) || Options->MaxMembers > EOS_LOBBY_MAX_LOBBY_MEMBERS)
         return EOS_EResult::EOS_InvalidParameters;
 
     _infos.set_max_lobby_member(Options->MaxMembers);
@@ -158,6 +158,23 @@ EOS_EResult EOSSDK_LobbyModification::AddAttribute(const EOS_LobbyModification_A
     }
 
     _lobby_modified = true;
+
+    std::string value_str;
+    switch (attribute.value().value_case())
+    {
+        case Lobby_Attr_Value::ValueCase::kB: value_str = attribute.value().b() ? "true" : "false"; break;
+        case Lobby_Attr_Value::ValueCase::kI: value_str = std::to_string(attribute.value().i()); break;
+        case Lobby_Attr_Value::ValueCase::kD: value_str = std::to_string(attribute.value().d()); break;
+        case Lobby_Attr_Value::ValueCase::kS: value_str = attribute.value().s(); break;
+        default: value_str = "?"; break;
+    }
+
+    APP_LOG(Log::LogLevel::DEBUG, "LobbyModification_AddAttribute: lobby=%s key='%s' value=%s visibility=%d",
+        _infos.lobby_id().c_str(),
+        Options->Attribute->Key,
+        value_str.c_str(),
+        attribute.visibility_type());
+
     return EOS_EResult::EOS_Success;
 }
 

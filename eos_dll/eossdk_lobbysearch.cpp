@@ -25,11 +25,20 @@
 namespace sdk
 {
 
+namespace
+{
+size_t lobby_search_score(Lobby_Infos_pb const& lobby)
+{
+    return lobby.attributes_size();
+}
+}
+
 decltype(EOSSDK_LobbySearch::search_timeout) EOSSDK_LobbySearch::search_timeout;
 decltype(EOSSDK_LobbySearch::search_id)      EOSSDK_LobbySearch::search_id(0);
 
 EOSSDK_LobbySearch::EOSSDK_LobbySearch() :
-    _released(false)
+    _released(false),
+    _search_broadcast_sent(false)
 {
     GetCB_Manager().register_callbacks(this);
 
@@ -85,20 +94,19 @@ void EOSSDK_LobbySearch::Find(const EOS_LobbySearch_FindOptions* Options, void* 
         fci.ResultCode = EOS_EResult::EOS_AlreadyPending;
         res->done = true;
     }
-    // If the user has set parameters and session_id or target userid, it fails
-    // If sessiondid and target userid is set, it fails
-    else if (
-             (_search_infos.parameters_size() != 0 && 
-                 (!_search_infos.target_id().empty() || !_search_infos.lobby_id().empty())) ||
-             (!_search_infos.target_id().empty() && !_search_infos.lobby_id().empty())
-            )
+    // lobby_id is exclusive; parameters + target_id is allowed (direct TCP route + attribute match).
+    else if (!_search_infos.lobby_id().empty() &&
+             (_search_infos.parameters_size() != 0 || !_search_infos.target_id().empty()))
     {
         fci.ResultCode = EOS_EResult::EOS_InvalidParameters;
         res->done = true;
+        APP_LOG(Log::LogLevel::INFO, "Lobby search Find rejected: lobby_id cannot be combined with parameters or target_id");
     }
     else
     {
         _search_cb = res;
+        _search_broadcast_sent = false;
+        _results.clear();
         _search_infos.set_search_id(search_id++);
         send_lobbies_search(&_search_infos);
     }
@@ -165,12 +173,18 @@ EOS_EResult EOSSDK_LobbySearch::SetParameter(const EOS_LobbySearch_SetParameterO
         casestr(EOS_LOBBY_SEARCH_MINCURRENTMEMBERS):
         casestr(EOS_LOBBY_SEARCH_MINSLOTSAVAILABLE):
         {
-            APP_LOG(Log::LogLevel::INFO, "TODO: Check if the new parameters comparison op is ignored or not: Operator = %u", utils::GetEnumValue(Options->ComparisonOp));
             if (Options->Parameter->ValueType != EOS_ESessionAttributeType::EOS_AT_INT64 ||
                 Options->ComparisonOp != EOS_EComparisonOp::EOS_CO_GREATERTHANOREQUAL)
             {
                 return EOS_EResult::EOS_InvalidParameters;
             }
+        }
+        break;
+
+        casestr(EOS_LOBBY_SEARCH_BUCKET_ID):
+        {
+            if (Options->Parameter->ValueType != EOS_ESessionAttributeType::EOS_AT_STRING)
+                return EOS_EResult::EOS_InvalidParameters;
         }
         break;
     }
@@ -242,11 +256,15 @@ EOS_EResult EOSSDK_LobbySearch::SetMaxResults(const EOS_LobbySearch_SetMaxResult
 uint32_t EOSSDK_LobbySearch::GetSearchResultCount(const EOS_LobbySearch_GetSearchResultCountOptions* Options)
 {
     TRACE_FUNC();
+    std::lock_guard<std::mutex> lk(_local_mutex);
 
     if (Options == nullptr || _search_cb.get() != nullptr)
         return 0;
 
-    return _results.size();
+    APP_LOG(Log::LogLevel::INFO, "Lobby search result count: %u (search_id=%llu)",
+        static_cast<unsigned>(_results.size()),
+        static_cast<unsigned long long>(_search_infos.search_id()));
+    return static_cast<uint32_t>(_results.size());
 }
 
 /**
@@ -278,6 +296,8 @@ EOS_EResult EOSSDK_LobbySearch::CopySearchResultByIndex(const EOS_LobbySearch_Co
     auto it = _results.begin();
     std::advance(it, Options->LobbyIndex);
     pLobbyDetails->_state.infos = *it;
+    GetEOS_Lobby().prepare_lobby_infos_for_unity(pLobbyDetails->_state.infos);
+    GetEOS_Lobby().patch_crossplatform_joinable_lobby(pLobbyDetails->_state.infos);
 
     *OutLobbyDetailsHandle = reinterpret_cast<EOS_HLobbyDetails>(pLobbyDetails);
     return EOS_EResult::EOS_Success;
@@ -310,7 +330,7 @@ bool EOSSDK_LobbySearch::send_lobbies_search(Lobbies_Search_pb* search)
     Lobbies_Search_Message_pb* search_msg = new Lobbies_Search_Message_pb();
 
     msg.set_source_id(user_id);
-    msg.set_game_id(Settings::Inst().appid);
+    msg.set_game_id(Settings::Inst().network_game_id());
 
     search_msg->set_allocated_search(search);
     msg.set_allocated_lobbies_search(search_msg);
@@ -318,6 +338,13 @@ bool EOSSDK_LobbySearch::send_lobbies_search(Lobbies_Search_pb* search)
     if (_search_infos.target_id().empty())
     {
         _search_peers = std::move(GetNetwork().TCPSendToAllPeers(msg));
+
+        msg.clear_dest_id();
+        if (GetNetwork().SendBroadcast(msg))
+            _search_broadcast_sent = true;
+
+        APP_LOG(Log::LogLevel::INFO, "Lobby search sent (tcp peers: %u, broadcast: %d, lobby_id: %s)",
+            static_cast<unsigned>(_search_peers.size()), _search_broadcast_sent ? 1 : 0, _search_infos.lobby_id().c_str());
     }
     else
     {
@@ -326,9 +353,14 @@ bool EOSSDK_LobbySearch::send_lobbies_search(Lobbies_Search_pb* search)
         {
             _search_peers.emplace(_search_infos.target_id());
         }
+
+        // Bootstrap: also broadcast when searching by target_id so unknown peers can respond with presence lobby
+        msg.clear_dest_id();
+        if (GetNetwork().SendBroadcast(msg))
+            _search_broadcast_sent = true;
     }
 
-    search_msg->release_search(); // Don't delete our search infos
+    (void)search_msg->release_search(); // Don't delete our search infos
 
     return true;
 }
@@ -341,20 +373,77 @@ bool EOSSDK_LobbySearch::on_lobbies_search_response(Network_Message_pb const& ms
     TRACE_FUNC();
     std::lock_guard<std::mutex> lk(_local_mutex);
 
-    if (_search_cb.get() != nullptr && resp.search_id() == _search_infos.search_id())
+    if (_search_cb.get() == nullptr)
     {
+        for (auto const& lobby : resp.lobbies())
+            GetEOS_Lobby().ingest_remote_lobby_from_search(lobby, msg.source_id());
+
+        APP_LOG(Log::LogLevel::DEBUG, "Lobby search response ingested (no active search) lobbies=%u search_id=%llu from=%s",
+            static_cast<unsigned>(resp.lobbies_size()),
+            static_cast<unsigned long long>(resp.search_id()),
+            msg.source_id().c_str());
+        return true;
+    }
+
+    if (resp.search_id() != _search_infos.search_id())
+    {
+        APP_LOG(Log::LogLevel::DEBUG, "Lobby search response search_id mismatch: got=%llu expected=%llu from=%s",
+            static_cast<unsigned long long>(resp.search_id()),
+            static_cast<unsigned long long>(_search_infos.search_id()),
+            msg.source_id().c_str());
         _search_peers.erase(msg.source_id());
-        if (_results.size() < _max_results)
+        return true;
+    }
+
+    if (_results.size() < _max_results)
+    {
+        for (auto const& lobby : resp.lobbies())
         {
-            for (auto const& lobby : resp.lobbies())
+            if (_results.size() >= _max_results)
+                break;
+
+            bool already_added = false;
+            for (auto it = _results.begin(); it != _results.end();)
             {
-                if (_results.size() < _max_results)
-                    _results.emplace_back(lobby);
-                else
+                if (it->lobby_id() == lobby.lobby_id())
+                {
+                    already_added = true;
                     break;
+                }
+
+                if (!lobby.owner_id().empty() && it->owner_id() == lobby.owner_id())
+                {
+                    if (lobby_search_score(lobby) > lobby_search_score(*it))
+                        it = _results.erase(it);
+                    else
+                    {
+                        already_added = true;
+                        break;
+                    }
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+            if (!already_added)
+            {
+                Lobby_Infos_pb prepared = lobby;
+                GetEOS_Lobby().prepare_lobby_infos_for_unity(prepared);
+                GetEOS_Lobby().patch_crossplatform_joinable_lobby(prepared);
+                _results.emplace_back(std::move(prepared));
             }
         }
     }
+
+    _search_peers.erase(msg.source_id());
+
+    APP_LOG(Log::LogLevel::INFO, "Lobby search response: added %u lobbies (total=%u) search_id=%llu from=%s pending_peers=%u",
+        static_cast<unsigned>(resp.lobbies_size()),
+        static_cast<unsigned>(_results.size()),
+        static_cast<unsigned long long>(resp.search_id()),
+        msg.source_id().c_str(),
+        static_cast<unsigned>(_search_peers.size()));
 
     return true;
 }
@@ -390,15 +479,41 @@ bool EOSSDK_LobbySearch::RunCallbacks(pFrameResult_t res)
         case EOS_LobbySearch_FindCallbackInfo::k_iCallback:
         {
             EOS_LobbySearch_FindCallbackInfo& fci = res->GetCallback<EOS_LobbySearch_FindCallbackInfo>();
-            if (_search_peers.empty() || 
-                (std::chrono::steady_clock::now() - _search_cb->created_time) > search_timeout)
-            {// All peers answered or Search timeout
-                if (_results.empty())
-                    fci.ResultCode = EOS_EResult::EOS_NotFound;
-                else
+            const auto elapsed = std::chrono::steady_clock::now() - _search_cb->created_time;
+            const bool timed_out = elapsed > search_timeout;
+
+            if (!timed_out)
+            {
+                if (!_search_infos.lobby_id().empty() && !_results.empty())
+                {
                     fci.ResultCode = EOS_EResult::EOS_Success;
-    
+                    _search_cb.reset();
+                    _search_broadcast_sent = false;
+                    res->done = true;
+                    break;
+                }
+
+                if (!_search_peers.empty())
+                    break;
+
+                if (_search_broadcast_sent && _results.empty())
+                    break;
+            }
+
+            if (_search_peers.empty() || timed_out)
+            {
+                if (_results.empty() &&
+                    (!_search_infos.lobby_id().empty() || !_search_infos.target_id().empty()))
+                {
+                    fci.ResultCode = EOS_EResult::EOS_NotFound;
+                }
+                else
+                {
+                    fci.ResultCode = EOS_EResult::EOS_Success;
+                }
+
                 _search_cb.reset();
+                _search_broadcast_sent = false;
                 res->done = true;
             }
         }
@@ -411,28 +526,7 @@ bool EOSSDK_LobbySearch::RunCallbacks(pFrameResult_t res)
 void EOSSDK_LobbySearch::FreeCallback(pFrameResult_t res)
 {
     std::lock_guard<std::mutex> lk(_local_mutex);
-
-    switch (res->ICallback())
-    {
-        /////////////////////////////
-        //        Callbacks        //
-        /////////////////////////////
-        //case EOS_LobbySearch::k_iCallback:
-        //{
-        //    EOS_SessionSearch_FindCallbackInfo& callback = res->GetCallback<EOS_SessionSearch_FindCallbackInfo>();
-        //    delete[]callback.InviteId;
-        //}
-        //break;
-        /////////////////////////////
-        //      Notifications      //
-        /////////////////////////////
-        //case notification_type::k_iCallback:
-        //{
-        //    notification_type& callback = res->GetCallback<notification_type>();
-        //    // Free resources
-        //}
-        //break;
-    }
+    (void)res;
 }
 
 }

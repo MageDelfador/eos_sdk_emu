@@ -21,6 +21,126 @@
 #include "eossdk_platform.h"
 #include "eossdk_auth.h"
 #include "settings.h"
+#include "eos_sdk_version.h"
+#include "eos_api_trace.h"
+#include "os_funcs.h"
+#include "eos_epicaccountiddetails.h"
+
+namespace
+{
+
+#if defined(_MSC_VER)
+static bool safe_read_product_user_id_is_valid(EOS_ProductUserId account_id)
+{
+    if (!sdk::is_derefable_eos_account_handle(account_id))
+        return false;
+
+    EOS_Bool valid = EOS_FALSE;
+    __try
+    {
+        valid = account_id->IsValid();
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        APP_LOG(Log::LogLevel::WARN, "ProductUserId_IsValid AV on handle %p", account_id);
+        return false;
+    }
+    return valid == EOS_TRUE;
+}
+
+static bool safe_read_product_user_id_string(EOS_ProductUserId account_id, std::string& out)
+{
+    if (!sdk::is_derefable_eos_account_handle(account_id))
+        return false;
+
+    __try
+    {
+        if (account_id->IsValid() != EOS_TRUE)
+            return false;
+        out = account_id->to_string();
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        APP_LOG(Log::LogLevel::WARN, "ProductUserId_ToString AV on handle %p", account_id);
+        return false;
+    }
+}
+#else
+static bool safe_read_product_user_id_is_valid(EOS_ProductUserId account_id)
+{
+    if (!sdk::is_derefable_eos_account_handle(account_id))
+        return false;
+    return account_id->IsValid() == EOS_TRUE;
+}
+
+static bool safe_read_product_user_id_string(EOS_ProductUserId account_id, std::string& out)
+{
+    if (!sdk::is_derefable_eos_account_handle(account_id))
+        return false;
+    if (account_id->IsValid() != EOS_TRUE)
+        return false;
+    out = account_id->to_string();
+    return true;
+}
+#endif
+
+static bool resolve_product_user_id_string(EOS_ProductUserId account_id, std::string& out)
+{
+    if (!sdk::is_derefable_eos_account_handle(account_id))
+        return false;
+
+    auto& product_ids = EOSSDK_Client::Inst()._productuserids;
+    for (auto const& entry : product_ids)
+    {
+        if (entry.second == account_id)
+            return safe_read_product_user_id_string(entry.second, out);
+    }
+
+    return false;
+}
+
+static bool resolve_product_user_id_is_valid(EOS_ProductUserId account_id)
+{
+    if (!sdk::is_derefable_eos_account_handle(account_id))
+        return false;
+
+    auto& product_ids = EOSSDK_Client::Inst()._productuserids;
+    for (auto const& entry : product_ids)
+    {
+        if (entry.second == account_id)
+            return safe_read_product_user_id_is_valid(entry.second);
+    }
+
+    return false;
+}
+
+void apply_gamename_from_product(char const* product_name)
+{
+    if (product_name == nullptr || *product_name == '\0')
+        return;
+
+    std::string const game_name(product_name);
+    auto& settings = Settings::Inst();
+
+    if (settings.gamename == game_name)
+        return;
+
+    APP_LOG(Log::LogLevel::INFO, "Updating gamename from '%s' to '%s' (EOS ProductName)",
+        settings.gamename.c_str(), game_name.c_str());
+
+    settings.gamename = game_name;
+    try
+    {
+        settings.save_settings();
+    }
+    catch (...)
+    {
+        APP_LOG(Log::LogLevel::WARN, "save_settings failed while updating gamename");
+    }
+}
+
+} // namespace
 
 EOSSDK_Client::EOSSDK_Client():
     _sdk_initialized(false)
@@ -50,9 +170,12 @@ EOS_EpicAccountId EOSSDK_Client::get_epicuserid(std::string const& userid)
     auto it = _epicuserids.find(userid);
     if (it == _epicuserids.end())
     {
-        EOS_EpicAccountId& accountid = _epicuserids[userid];
-        accountid = new EOS_EpicAccountIdDetails;
+        EOS_EpicAccountId accountid = new (std::nothrow) EOS_EpicAccountIdDetails;
+        if (!accountid)
+            return GetInvalidEpicUserId();
+
         accountid->from_string(userid);
+        _epicuserids[userid] = accountid;
         res = accountid;
     }
     else
@@ -70,9 +193,12 @@ EOS_ProductUserId EOSSDK_Client::get_productuserid(std::string const& userid)
     auto it = _productuserids.find(userid);
     if (it == _productuserids.end())
     {
-        EOS_ProductUserId& accountid = _productuserids[userid];
-        accountid = new EOS_ProductUserIdDetails;
+        EOS_ProductUserId accountid = new (std::nothrow) EOS_ProductUserIdDetails;
+        if (!accountid)
+            return GetInvalidProductUserId();
+
         accountid->from_string(userid);
+        _productuserids[userid] = accountid;
         res = accountid;
     }
     else
@@ -98,100 +224,153 @@ EOS_ProductUserId EOSSDK_Client::get_productuserid(std::string const& userid)
 // I:\TetrisEffect\TetrisEffect\Binaries\Win64\TetrisEffect-Win64-Shipping.exe
 static bool set_eos_compat(int32_t compat_version)
 {
+#if defined(_MSC_VER) && defined(_WIN64)
+    (void)compat_version;
+    return false;
+#else
     int failed = false;
 #if ! defined(__WINDOWS_32__)
-    if (compat_version == 1)
+    try
     {
-        APP_LOG(Log::LogLevel::DEBUG, "Tryiing to replace EOS_Auth_CopyUserAuthToken(%p) with EOS_Auth_CopyUserAuthTokenOld(%p)", EOS_Auth_CopyUserAuthToken, EOS_Auth_CopyUserAuthTokenOld);
-        if (mini_detour::replace_func((void*)EOS_Auth_CopyUserAuthToken, (void*)EOS_Auth_CopyUserAuthTokenOld) ||
-            mini_detour::replace_func((void*)EOS_Auth_AddNotifyLoginStatusChanged, (void*)EOS_Auth_AddNotifyLoginStatusChangedOld))
+        if (compat_version == 1)
         {
-            failed = true;
+            APP_LOG(Log::LogLevel::DEBUG, "Tryiing to replace EOS_Auth_CopyUserAuthToken(%p) with EOS_Auth_CopyUserAuthTokenOld(%p)", EOS_Auth_CopyUserAuthToken, EOS_Auth_CopyUserAuthTokenOld);
+            if (mini_detour::replace_func((void*)EOS_Auth_CopyUserAuthToken, (void*)EOS_Auth_CopyUserAuthTokenOld) ||
+                mini_detour::replace_func((void*)EOS_Auth_AddNotifyLoginStatusChanged, (void*)EOS_Auth_AddNotifyLoginStatusChangedOld))
+            {
+                failed = true;
+            }
+        }
+        else
+        {
+            APP_LOG(Log::LogLevel::DEBUG, "Tryiing to replace EOS_Auth_CopyUserAuthToken(%p) with EOS_Auth_CopyUserAuthTokenNew(%p)", EOS_Auth_CopyUserAuthToken, EOS_Auth_CopyUserAuthTokenNew);
+            if (mini_detour::replace_func((void*)EOS_Auth_CopyUserAuthToken, (void*)EOS_Auth_CopyUserAuthTokenNew) ||
+                mini_detour::replace_func((void*)EOS_Auth_AddNotifyLoginStatusChanged, (void*)EOS_Auth_AddNotifyLoginStatusChangedNew))
+            {
+                failed = true;
+            }
         }
     }
-    else
+    catch (...)
     {
-        APP_LOG(Log::LogLevel::DEBUG, "Tryiing to replace EOS_Auth_CopyUserAuthToken(%p) with EOS_Auth_CopyUserAuthTokenNew(%p)", EOS_Auth_CopyUserAuthToken, EOS_Auth_CopyUserAuthTokenNew);
-        if (mini_detour::replace_func((void*)EOS_Auth_CopyUserAuthToken, (void*)EOS_Auth_CopyUserAuthTokenNew) ||
-            mini_detour::replace_func((void*)EOS_Auth_AddNotifyLoginStatusChanged, (void*)EOS_Auth_AddNotifyLoginStatusChangedNew))
-        {
-            failed = true;
-        }
+        APP_LOG(Log::LogLevel::WARN, "set_eos_compat failed with an exception");
+        failed = true;
     }
 #endif
     return failed;
+#endif
 }
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Initialize(const EOS_InitializeOptions* Options)
 {
-    GLOBAL_LOCK();
-
-    Settings::Inst();
-    TRACE_FUNC();
-
-    auto &inst = EOSSDK_Client::Inst();
-
-    if (inst._sdk_initialized)
-        return EOS_EResult::EOS_AlreadyConfigured;
-
     if (Options == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
-    if (Settings::Inst().disable_online_networking)
+    try
     {
-        disable_online_networking();
-    }
+        EOS_API_TRACE();
+        GLOBAL_LOCK();
 
-    if (set_eos_compat(Options->ApiVersion))
-    {
-        APP_LOG(Log::LogLevel::FATAL, "Couldn't replace our dummy EOS_Auth_CopyUserAuthToken, the function will not work and thus we terminate.");
-        abort();
-    }
+        ensure_emu_initialized();
+        TRACE_FUNC();
 
-    switch (Options->ApiVersion)
-    {
-	case 5:
-        case EOS_INITIALIZE_API_004:
+        auto &inst = EOSSDK_Client::Inst();
+
+        if (inst._sdk_initialized)
+            return EOS_EResult::EOS_Success;
+
+        if (Settings::Inst().disable_online_networking)
+        {
+            try
+            {
+                disable_online_networking();
+            }
+            catch (...)
+            {
+                APP_LOG(Log::LogLevel::WARN, "disable_online_networking failed, continuing without hooks");
+            }
+        }
+
+        if (set_eos_compat(Options->ApiVersion))
+        {
+            APP_LOG(Log::LogLevel::WARN, "Couldn't replace EOS_Auth_CopyUserAuthToken compat shims");
+        }
+
+        sdk::EosSdkVersion::on_initialize_api(Options->ApiVersion);
+
+        switch (Options->ApiVersion)
+        {
+            case EOS_INITIALIZE_API_005:
+            case EOS_INITIALIZE_API_004:
+            {
+                auto p = reinterpret_cast<const EOS_InitializeOptions004*>(Options);
+                APP_LOG(Log::LogLevel::DEBUG, "OverrideThreadAffinity = %p", p->OverrideThreadAffinity);
+            }
+
+            case EOS_INITIALIZE_API_003:
+            {
+                auto p = reinterpret_cast<const EOS_InitializeOptions003*>(Options);
+                APP_LOG(Log::LogLevel::DEBUG, "SystemInitializeOptions = %p", p->SystemInitializeOptions);
+            }
+
+            case EOS_INITIALIZE_API_002:
+            {
+                auto p = reinterpret_cast<const EOS_InitializeOptions002*>(Options);
+                APP_LOG(Log::LogLevel::DEBUG, "Reserved = %p", p->Reserved);
+            }
+
+            case EOS_INITIALIZE_API_001:
+            {
+                auto p = reinterpret_cast<const EOS_InitializeOptions001*>(Options);
+                APP_LOG(Log::LogLevel::DEBUG, "ApiVersion = %u", p->ApiVersion);
+                APP_LOG(Log::LogLevel::DEBUG, "AllocateMemoryFunction = %p", p->AllocateMemoryFunction);
+                APP_LOG(Log::LogLevel::DEBUG, "ReallocateMemoryFunction = %p", p->ReallocateMemoryFunction);
+                APP_LOG(Log::LogLevel::DEBUG, "ReleaseMemoryFunction = %p", p->ReleaseMemoryFunction);
+                APP_LOG(Log::LogLevel::DEBUG, "ProductName = %s", p->ProductName ? p->ProductName : "");
+                APP_LOG(Log::LogLevel::DEBUG, "ProductVersion = %s", p->ProductVersion ? p->ProductVersion : "");
+
+                inst._allocate_memory_func = p->AllocateMemoryFunction;
+                inst._reallocate_memory_func = p->ReallocateMemoryFunction;
+                inst._release_memory_func = p->ReleaseMemoryFunction;
+
+                inst.api_version = p->ApiVersion;
+                if (p->ProductName != nullptr && *p->ProductName != '\0')
+                {
+                    inst._product_name = Options->ProductName;
+                    apply_gamename_from_product(p->ProductName);
+                }
+                else
+                {
+                    inst._product_name = Settings::Inst().gamename;
+                }
+                if (p->ProductVersion != nullptr)
+                    inst._product_version = Options->ProductVersion;
+            }
+            break;
+
+            default:
+                APP_LOG(Log::LogLevel::WARN, "Unknown EOS_Initialize API version %d, treating as %d", Options->ApiVersion, EOS_INITIALIZE_API_005);
+                goto initialize_latest;
+        }
+
+        inst._sdk_initialized = true;
+        return EOS_EResult::EOS_Success;
+
+    initialize_latest:
         {
             auto p = reinterpret_cast<const EOS_InitializeOptions004*>(Options);
             APP_LOG(Log::LogLevel::DEBUG, "OverrideThreadAffinity = %p", p->OverrideThreadAffinity);
         }
-
-        case EOS_INITIALIZE_API_003:
-        {
-            auto p = reinterpret_cast<const EOS_InitializeOptions003*>(Options);
-            APP_LOG(Log::LogLevel::DEBUG, "SystemInitializeOptions = %p", p->SystemInitializeOptions);
-        }
-
-        case EOS_INITIALIZE_API_002:
-        {
-            auto p = reinterpret_cast<const EOS_InitializeOptions002*>(Options);
-            APP_LOG(Log::LogLevel::DEBUG, "Reserved = %p", p->Reserved);
-        }
-
-        case EOS_INITIALIZE_API_001:
         {
             auto p = reinterpret_cast<const EOS_InitializeOptions001*>(Options);
-            APP_LOG(Log::LogLevel::DEBUG, "ApiVersion = %u", p->ApiVersion);
-            APP_LOG(Log::LogLevel::DEBUG, "AllocateMemoryFunction = %p", p->AllocateMemoryFunction);
-            APP_LOG(Log::LogLevel::DEBUG, "ReallocateMemoryFunction = %p", p->ReallocateMemoryFunction);
-            APP_LOG(Log::LogLevel::DEBUG, "ReleaseMemoryFunction = %p", p->ReleaseMemoryFunction);
-            APP_LOG(Log::LogLevel::DEBUG, "ProductName = %s", p->ProductName);
-            APP_LOG(Log::LogLevel::DEBUG, "ProductVersion = %s", p->ProductVersion);
-
             inst._allocate_memory_func = p->AllocateMemoryFunction;
             inst._reallocate_memory_func = p->ReallocateMemoryFunction;
             inst._release_memory_func = p->ReleaseMemoryFunction;
-
-            inst.api_version = p->ApiVersion;
+            inst.api_version = Options->ApiVersion;
             if (p->ProductName != nullptr && *p->ProductName != '\0')
             {
                 inst._product_name = Options->ProductName;
-                if (Settings::Inst().gamename.empty() || Settings::Inst().gamename == "DefaultGameName")
-                {// Set the gamename in the settings if a gamename was passed in the cmdline and its empty in the JSon
-                    Settings::Inst().gamename = inst._product_name;
-                    Settings::Inst().save_settings();
-                }
+                apply_gamename_from_product(p->ProductName);
             }
             else
             {
@@ -200,15 +379,42 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Initialize(const EOS_InitializeOptions* Option
             if (p->ProductVersion != nullptr)
                 inst._product_version = Options->ProductVersion;
         }
-        break;
 
-        default:
-            APP_LOG(Log::LogLevel::FATAL, "Unmanaged API version %d", Options->ApiVersion);
-            abort();
+        inst._sdk_initialized = true;
+        return EOS_EResult::EOS_Success;
     }
+    catch (...)
+    {
+#if defined(__WINDOWS__)
+        OutputDebugStringA("NemirtingasEpicEmu: EOS_Initialize failed, applying fallback init\n");
+#endif
+        APP_LOG(Log::LogLevel::WARN, "EOS_Initialize failed with an exception, applying fallback init");
 
-    inst._sdk_initialized = true;
-    return EOS_EResult::EOS_Success;
+        try
+        {
+            auto &inst = EOSSDK_Client::Inst();
+            if (!inst._sdk_initialized)
+            {
+                inst.api_version = Options->ApiVersion;
+                inst._product_name = Settings::Inst().gamename;
+                if (Options->ProductName != nullptr && *Options->ProductName != '\0')
+                {
+                    inst._product_name = Options->ProductName;
+                    apply_gamename_from_product(Options->ProductName);
+                }
+                if (Options->ProductVersion != nullptr)
+                    inst._product_version = Options->ProductVersion;
+                inst._sdk_initialized = true;
+            }
+        }
+        catch (...)
+        {
+        }
+
+        return EOSSDK_Client::Inst()._sdk_initialized
+            ? EOS_EResult::EOS_Success
+            : EOS_EResult::EOS_UnexpectedError;
+    }
 }
 
 /**
@@ -222,6 +428,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Initialize(const EOS_InitializeOptions* Option
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Shutdown()
 {
+    EOS_API_TRACE();
     TRACE_FUNC();
     GLOBAL_LOCK();
 
@@ -241,6 +448,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Shutdown()
  */
 EOS_DECLARE_FUNC(const char*) EOS_EResult_ToString(EOS_EResult Result)
 {
+    EOS_API_TRACE();
     TRACE_FUNC();
 
     switch (Result)
@@ -426,6 +634,7 @@ EOS_DECLARE_FUNC(const char*) EOS_EResult_ToString(EOS_EResult Result)
  */
 EOS_DECLARE_FUNC(EOS_Bool) EOS_EResult_IsOperationComplete(EOS_EResult Result)
 {
+    EOS_API_TRACE();
     TRACE_FUNC();
 
     switch (Result)
@@ -449,10 +658,27 @@ EOS_DECLARE_FUNC(EOS_Bool) EOS_EResult_IsOperationComplete(EOS_EResult Result)
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_ByteArray_ToString(const uint8_t* ByteArray, const uint32_t Length, char* OutBuffer, uint32_t* InOutBufferLength)
 {
+    EOS_API_TRACE();
     TRACE_FUNC();
-    APP_LOG(Log::LogLevel::INFO, "TODO");
 
-    memcpy(OutBuffer, ByteArray, Length);
+    if (ByteArray == nullptr || OutBuffer == nullptr || InOutBufferLength == nullptr)
+        return EOS_EResult::EOS_InvalidParameters;
+
+    const uint32_t required_length = Length * 2 + 1;
+    if (*InOutBufferLength < required_length)
+    {
+        *InOutBufferLength = required_length;
+        return EOS_EResult::EOS_LimitExceeded;
+    }
+
+    static const char hex_digits[] = "0123456789ABCDEF";
+    for (uint32_t i = 0; i < Length; ++i)
+    {
+        OutBuffer[i * 2] = hex_digits[(ByteArray[i] >> 4) & 0x0F];
+        OutBuffer[i * 2 + 1] = hex_digits[ByteArray[i] & 0x0F];
+    }
+    OutBuffer[Length * 2] = '\0';
+    *InOutBufferLength = required_length;
 
     return EOS_EResult::EOS_Success;
 }
@@ -465,13 +691,15 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_ByteArray_ToString(const uint8_t* ByteArray, c
  */
 EOS_DECLARE_FUNC(EOS_Bool) EOS_AccountId_IsValid(EOS_AccountId AccountId)
 {
+    EOS_API_TRACE();
     return EOS_EpicAccountId_IsValid(AccountId);
 }
 
 EOS_DECLARE_FUNC(EOS_Bool) EOS_EpicAccountId_IsValid(EOS_EpicAccountId AccountId)
 {
+    EOS_API_TRACE();
     //TRACE_FUNC();
-    if (AccountId == nullptr)
+    if (!sdk::is_derefable_eos_account_handle(AccountId))
         return EOS_FALSE;
 
     auto& user_ids = EOSSDK_Client::Inst()._epicuserids;
@@ -505,14 +733,43 @@ EOS_DECLARE_FUNC(EOS_Bool) EOS_EpicAccountId_IsValid(EOS_EpicAccountId AccountId
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_AccountId_ToString(EOS_AccountId AccountId, char* OutBuffer, int32_t* InOutBufferLength)
 {
+    EOS_API_TRACE();
     return EOS_EpicAccountId_ToString(AccountId, OutBuffer, InOutBufferLength);
 }
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_EpicAccountId_ToString(EOS_EpicAccountId AccountId, char* OutBuffer, int32_t* InOutBufferLength)
 {
+    EOS_API_TRACE();
     //TRACE_FUNC();
-    if (AccountId == nullptr || !AccountId->IsValid())
+    if (!sdk::is_derefable_eos_account_handle(AccountId))
         return EOS_EResult::EOS_InvalidUser;
+
+    if (!sdk::is_derefable_pointer(InOutBufferLength))
+        return EOS_EResult::EOS_InvalidParameters;
+
+    if (OutBuffer != nullptr && !AccountId->IsValid())
+        return EOS_EResult::EOS_InvalidUser;
+
+    if (OutBuffer == nullptr)
+    {
+        if (!AccountId->IsValid())
+            return EOS_EResult::EOS_InvalidUser;
+
+        size_t len = 0;
+        {
+            auto& user_ids = EOSSDK_Client::Inst()._epicuserids;
+            auto it = std::find_if(user_ids.begin(), user_ids.end(), [AccountId](std::pair<std::string const, EOS_EpicAccountId>& user_id)
+            {
+                return user_id.second == AccountId;
+            });
+            if (it == user_ids.end())
+                return EOS_EResult::EOS_InvalidUser;
+
+            len = AccountId->to_string().length() + 1;
+        }
+        *InOutBufferLength = static_cast<int32_t>(len);
+        return EOS_EResult::EOS_LimitExceeded;
+    }
 
     auto& user_ids = EOSSDK_Client::Inst()._epicuserids;
     auto it = std::find_if(user_ids.begin(), user_ids.end(), [AccountId](std::pair<std::string const, EOS_EpicAccountId>& user_id)
@@ -536,11 +793,13 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_EpicAccountId_ToString(EOS_EpicAccountId Accou
  */
 EOS_DECLARE_FUNC(EOS_AccountId) EOS_AccountId_FromString(const char* AccountIdString)
 {
+    EOS_API_TRACE();
     return EOS_EpicAccountId_FromString(AccountIdString);
 }
 
 EOS_DECLARE_FUNC(EOS_EpicAccountId) EOS_EpicAccountId_FromString(const char* AccountIdString)
 {
+    EOS_API_TRACE();
     //TRACE_FUNC();
     if (AccountIdString == nullptr)
         return EOSSDK_Client::Inst().get_epicuserid(sdk::NULL_USER_ID);
@@ -556,22 +815,8 @@ EOS_DECLARE_FUNC(EOS_EpicAccountId) EOS_EpicAccountId_FromString(const char* Acc
  */
 EOS_DECLARE_FUNC(EOS_Bool) EOS_ProductUserId_IsValid(EOS_ProductUserId AccountId)
 {
-    //TRACE_FUNC();
-    if (AccountId == nullptr)
-        return EOS_FALSE;
-
-    auto& product_ids = EOSSDK_Client::Inst()._productuserids;
-    auto it = std::find_if(product_ids.begin(), product_ids.end(), [AccountId]( std::pair<std::string const, EOS_ProductUserId>& product_id)
-    {
-        return product_id.second == AccountId;
-    });
-    if (it == product_ids.end())
-    {
-        APP_LOG(Log::LogLevel::WARN, "Product User Id (%p) not found in the cache, wrong parameter returned in a function ?", AccountId);
-        return EOS_FALSE;
-    }
-
-    return AccountId->IsValid();
+    EOS_API_TRACE_POLL(500);
+    return resolve_product_user_id_is_valid(AccountId) ? EOS_TRUE : EOS_FALSE;
 }
 
 /**
@@ -591,23 +836,34 @@ EOS_DECLARE_FUNC(EOS_Bool) EOS_ProductUserId_IsValid(EOS_ProductUserId AccountId
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_ProductUserId_ToString(EOS_ProductUserId AccountId, char* OutBuffer, int32_t* InOutBufferLength)
 {
-    //TRACE_FUNC();
+    EOS_API_TRACE_POLL(500);
 
-    if (AccountId == nullptr || !AccountId->IsValid())
+    if (!sdk::is_derefable_pointer(InOutBufferLength))
+        return EOS_EResult::EOS_InvalidParameters;
+
+    if (OutBuffer != nullptr && !sdk::is_derefable_pointer(OutBuffer))
+        return EOS_EResult::EOS_InvalidParameters;
+
+    std::string idstr;
+    if (!resolve_product_user_id_string(AccountId, idstr))
         return EOS_EResult::EOS_InvalidUser;
 
-    auto& product_ids = EOSSDK_Client::Inst()._productuserids;
-    auto it = std::find_if(product_ids.begin(), product_ids.end(), [AccountId]( std::pair<std::string const, EOS_ProductUserId>& product_id)
+    size_t const len = idstr.length() + 1;
+    if (OutBuffer == nullptr)
     {
-        return product_id.second == AccountId;
-    });
-    if (it == product_ids.end())
-    {
-        APP_LOG(Log::LogLevel::WARN, "Product User Id (%p) not found in the cache, wrong parameter returned in a function ?", AccountId);
-        return EOS_EResult::EOS_InvalidUser;
+        *InOutBufferLength = static_cast<int32_t>(len);
+        return EOS_EResult::EOS_LimitExceeded;
     }
 
-    return AccountId->ToString(OutBuffer, InOutBufferLength);
+    if (*InOutBufferLength < static_cast<int32_t>(len))
+    {
+        *InOutBufferLength = static_cast<int32_t>(len);
+        return EOS_EResult::EOS_LimitExceeded;
+    }
+
+    strncpy(OutBuffer, idstr.c_str(), len);
+    *InOutBufferLength = static_cast<int32_t>(len);
+    return EOS_EResult::EOS_Success;
 }
 
 /**
@@ -618,6 +874,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_ProductUserId_ToString(EOS_ProductUserId Accou
  */
 EOS_DECLARE_FUNC(EOS_ProductUserId) EOS_ProductUserId_FromString(const char* AccountIdString)
 {
+    EOS_API_TRACE();
     //TRACE_FUNC();
     if (AccountIdString == nullptr)
         return EOSSDK_Client::Inst().get_productuserid(sdk::NULL_USER_ID);
@@ -645,6 +902,7 @@ EOS_DECLARE_FUNC(EOS_ProductUserId) EOS_ProductUserId_FromString(const char* Acc
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_ContinuanceToken_ToString(EOS_ContinuanceToken ContinuanceToken, char* OutBuffer, int32_t* InOutBufferLength)
 {
+    EOS_API_TRACE();
     TRACE_FUNC();
     if (ContinuanceToken == nullptr)
         return EOS_EResult::EOS_InvalidUser;
@@ -666,6 +924,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_ContinuanceToken_ToString(EOS_ContinuanceToken
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Logging_SetCallback(EOS_LogMessageFunc Callback)
 {
+    EOS_API_TRACE();
     TRACE_FUNC();
 
     return EOS_EResult::EOS_Success;
@@ -682,6 +941,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Logging_SetCallback(EOS_LogMessageFunc Callbac
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Logging_SetLogLevel(EOS_ELogCategory LogCategory, EOS_ELogLevel LogLevel)
 {
+    EOS_API_TRACE();
     TRACE_FUNC();
 
     return EOS_EResult::EOS_Success;
@@ -689,20 +949,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Logging_SetLogLevel(EOS_ELogCategory LogCatego
 
 EOS_DECLARE_FUNC(const char*) EOS_GetVersion(void)
 {
-    std::map<std::string, const char*> versions{
-        { "1.0.0", "1.0.0-5464091"  },
-        { "1.1.0", "1.1.0-6537116"  },
-        { "1.2.0", "1.2.0-9765216"  },
-        { "1.3.0", "1.3.0-11034880" },
-        { "1.3.1", "1.3.1-11123224" },
-        { "1.5.0", "1.5.0-12496671" },
-        { "1.6.0", "1.6.0-13289764" },
-        { "1.6.1", "1.6.1-13568552" },
-        { "1.6.2", "1.6.2-13619780" },
-        { "1.7.0", "1.7.0-13812567" },
-        { "1.7.1", "1.7.1-13992660" },
-        { "1.8.0", "1.8.0-14316386" },
-    };
-    
-    return versions[EOS_VERSION_STRING];
+    EOS_API_TRACE();
+    ensure_emu_initialized();
+    return sdk::EosSdkVersion::reported_string();
 }

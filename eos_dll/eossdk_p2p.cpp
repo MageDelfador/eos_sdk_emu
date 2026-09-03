@@ -22,8 +22,653 @@
 #include "eos_client_api.h"
 #include "settings.h"
 
+#include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <memory>
+#include <optional>
+#include <random>
+#include <unordered_map>
+#include <vector>
+
 namespace sdk
 {
+namespace
+{
+struct cached_p2p_established_t
+{
+    EOS_ProductUserId remote_id{};
+    std::string socket_name;
+    EOS_EConnectionEstablishedType connection_type{ EOS_EConnectionEstablishedType::EOS_CET_NewConnection };
+};
+
+static std::unique_ptr<cached_p2p_established_t> g_cached_p2p_established;
+
+static void fill_peer_connection_established_info(
+    EOS_P2P_OnPeerConnectionEstablishedInfo& opcei,
+    EOS_ProductUserId remote_id,
+    std::string const& socket_name,
+    EOS_EConnectionEstablishedType connection_type)
+{
+    opcei.ConnectionType = connection_type;
+    opcei.RemoteUserId = remote_id;
+    EOS_P2P_SocketId* socket_id = new EOS_P2P_SocketId;
+    socket_id->ApiVersion = EOS_P2P_SOCKETID_API_LATEST;
+    strncpy(const_cast<char*>(socket_id->SocketName),
+        socket_name.c_str(),
+        sizeof(EOS_P2P_SocketId::SocketName) - 1);
+    socket_id->SocketName[sizeof(EOS_P2P_SocketId::SocketName) - 1] = '\0';
+    opcei.SocketId = socket_id;
+}
+
+static void queue_peer_connection_established(EOSSDK_P2P* self, pFrameResult_t notif, cached_p2p_established_t const& cached)
+{
+    EOS_P2P_OnPeerConnectionEstablishedInfo& opcei =
+        notif->GetCallback<EOS_P2P_OnPeerConnectionEstablishedInfo>();
+    fill_peer_connection_established_info(opcei, cached.remote_id, cached.socket_name, cached.connection_type);
+    notif->done = true;
+    GetCB_Manager().add_callback(self, notif);
+}
+}
+
+namespace
+{
+enum class ue_handshake_packet_type_e : uint8_t
+{
+    Initial = 0,
+    Challenge = 1,
+    Response = 2,
+    Ack = 3,
+};
+
+struct ue_parsed_handshake_t
+{
+    uint8_t travel_count = 0;
+    uint8_t client_id = 0;
+    bool restarted = false;
+    uint8_t min_supported_version = 0;
+    uint8_t handshake_version = 0;
+    ue_handshake_packet_type_e packet_type = ue_handshake_packet_type_e::Initial;
+    uint8_t sent_count = 0;
+    uint32_t local_network_version = 0;
+    uint16_t runtime_features = 0;
+    uint8_t secret_id = 0;
+    double timestamp = 0.0;
+    uint8_t cookie[20]{};
+    size_t padding_bits = 0;
+};
+
+struct ue_pending_challenge_t
+{
+    double timestamp = 0.0;
+    uint8_t secret_id = 0;
+    uint8_t cookie[20]{};
+    uint8_t assigned_client_id = 1;
+};
+
+constexpr size_t kHandshakeCookieBytes = 20;
+constexpr uint8_t kHandshakeVersionRandomized = 1;
+constexpr uint8_t kHandshakeVersionNetCL = 2;
+
+class ue_bit_reader_t
+{
+public:
+    explicit ue_bit_reader_t(std::string const& data)
+        : _data(reinterpret_cast<uint8_t const*>(data.data()))
+        , _num_bits(data.size() * 8)
+    {
+    }
+
+    bool read_bit()
+    {
+        if (_pos >= _num_bits)
+            return false;
+        bool const bit = (_data[_pos >> 3] >> (_pos & 7)) & 1;
+        ++_pos;
+        return bit;
+    }
+
+    bool read_bits_to_bytes(uint8_t* out, size_t bit_count)
+    {
+        std::memset(out, 0, (bit_count + 7) / 8);
+        for (size_t i = 0; i < bit_count; ++i)
+        {
+            if (!read_bit())
+                return false;
+            if ((_data[(_pos - 1) >> 3] >> ((_pos - 1) & 7)) & 1)
+                out[i >> 3] |= static_cast<uint8_t>(1u << (i & 7));
+        }
+        return true;
+    }
+
+    bool read_double(double& out)
+    {
+        uint8_t raw[8]{};
+        if (!read_bits_to_bytes(raw, 64))
+            return false;
+        std::memcpy(&out, raw, sizeof(out));
+        return true;
+    }
+
+    bool read_serialize_int(uint32_t value_max, uint32_t& out)
+    {
+        if (value_max < 2)
+            return false;
+
+        out = 0;
+        uint32_t mask = 1;
+        while ((out + mask) < value_max)
+        {
+            if (_pos >= _num_bits)
+                return false;
+            if (read_bit())
+                out |= mask;
+            mask <<= 1;
+        }
+        return true;
+    }
+
+    size_t pos_bits() const { return _pos; }
+    size_t num_bits() const { return _num_bits; }
+
+private:
+    uint8_t const* _data = nullptr;
+    size_t _num_bits = 0;
+    size_t _pos = 0;
+};
+
+class ue_bit_writer_t
+{
+public:
+    void write_bit(bool value)
+    {
+        size_t const byte_index = _num_bits >> 3;
+        if (byte_index >= _data.size())
+            _data.push_back(0);
+
+        if (value)
+            _data[byte_index] |= static_cast<uint8_t>(1u << (_num_bits & 7));
+        ++_num_bits;
+    }
+
+    void write_bits_from_bytes(uint8_t const* src, size_t bit_count)
+    {
+        for (size_t i = 0; i < bit_count; ++i)
+            write_bit((src[i >> 3] >> (i & 7)) & 1);
+    }
+
+    void write_double(double value)
+    {
+        uint8_t raw[8]{};
+        std::memcpy(raw, &value, sizeof(raw));
+        write_bits_from_bytes(raw, 64);
+    }
+
+    void write_bytes(uint8_t const* src, size_t byte_count)
+    {
+        write_bits_from_bytes(src, byte_count * 8);
+    }
+
+    void write_serialize_int(uint32_t value, uint32_t value_max)
+    {
+        if (value_max < 2)
+            return;
+
+        value = std::min(value, value_max - 1);
+        uint32_t new_value = 0;
+        uint32_t mask = 1;
+        while ((new_value + mask) < value_max && mask != 0)
+        {
+            write_bit((value & mask) != 0);
+            new_value |= mask;
+            mask <<= 1;
+        }
+    }
+
+    std::string finish() const
+    {
+        return std::string(reinterpret_cast<char const*>(_data.data()), (_num_bits + 7) / 8);
+    }
+
+private:
+    std::vector<uint8_t> _data;
+    size_t _num_bits = 0;
+};
+
+void fill_random_bytes(uint8_t* buf, size_t len)
+{
+    static thread_local std::mt19937 gen{ std::random_device{}() };
+    std::uniform_int_distribution<int> dis(0, 255);
+    for (size_t i = 0; i < len; ++i)
+        buf[i] = static_cast<uint8_t>(dis(gen));
+}
+
+void begin_ue_handshake(ue_bit_writer_t& writer,
+    ue_handshake_packet_type_e packet_type,
+    ue_parsed_handshake_t const& parsed,
+    uint8_t sent_count)
+{
+    writer.write_serialize_int(parsed.travel_count, 4);
+    writer.write_serialize_int(parsed.client_id, 8);
+    writer.write_bit(true);
+    writer.write_bit(parsed.restarted);
+
+    if (parsed.handshake_version >= kHandshakeVersionRandomized)
+    {
+        uint8_t header[4] = {
+            parsed.min_supported_version,
+            parsed.handshake_version,
+            static_cast<uint8_t>(packet_type),
+            sent_count,
+        };
+        writer.write_bytes(header, sizeof(header));
+    }
+
+    if (parsed.handshake_version >= kHandshakeVersionNetCL)
+    {
+        uint8_t net_ver[4]{};
+        std::memcpy(net_ver, &parsed.local_network_version, sizeof(net_ver));
+        writer.write_bits_from_bytes(net_ver, 32);
+
+        uint8_t runtime[2]{};
+        std::memcpy(runtime, &parsed.runtime_features, sizeof(runtime));
+        writer.write_bits_from_bytes(runtime, 16);
+    }
+}
+
+void cap_ue_handshake(ue_bit_writer_t& writer, ue_parsed_handshake_t const& parsed)
+{
+    if (parsed.handshake_version != 0 && parsed.padding_bits >= 8)
+    {
+        size_t const pad_bytes = parsed.padding_bits / 8;
+        std::vector<uint8_t> padding(pad_bytes);
+        fill_random_bytes(padding.data(), padding.size());
+        writer.write_bytes(padding.data(), padding.size());
+    }
+    writer.write_bit(true);
+}
+
+std::string format_hex_dump(std::string const& data, size_t max_bytes = 64)
+{
+    size_t const limit = std::min(data.size(), max_bytes);
+    std::string out;
+    out.reserve(limit * 3 + 16);
+    char tmp[4]{};
+    for (size_t i = 0; i < limit; ++i)
+    {
+        std::snprintf(tmp, sizeof(tmp), "%02x", static_cast<unsigned char>(data[i]));
+        if (i != 0)
+            out.push_back(' ');
+        out.append(tmp);
+    }
+    if (data.size() > limit)
+        out += " ...";
+    return out;
+}
+
+bool parse_ue_stateless_handshake(std::string const& packet, ue_parsed_handshake_t& out)
+{
+    if (packet.size() < 16)
+        return false;
+
+    ue_bit_reader_t reader(packet);
+
+    uint32_t travel_count = 0;
+    uint32_t client_id = 0;
+    if (!reader.read_serialize_int(4, travel_count))
+        return false;
+    if (!reader.read_serialize_int(8, client_id))
+        return false;
+    out.travel_count = static_cast<uint8_t>(travel_count);
+    out.client_id = static_cast<uint8_t>(client_id);
+    if (!reader.read_bit())
+        return false;
+
+    out.restarted = reader.read_bit();
+
+    uint8_t header[4]{};
+    if (!reader.read_bits_to_bytes(header, 32))
+        return false;
+
+    out.min_supported_version = header[0];
+    out.handshake_version = header[1];
+    out.packet_type = static_cast<ue_handshake_packet_type_e>(header[2]);
+    out.sent_count = header[3];
+
+    if (out.handshake_version >= kHandshakeVersionNetCL)
+    {
+        uint8_t net_ver[4]{};
+        uint8_t runtime[2]{};
+        if (!reader.read_bits_to_bytes(net_ver, 32))
+            return false;
+        if (!reader.read_bits_to_bytes(runtime, 16))
+            return false;
+        std::memcpy(&out.local_network_version, net_ver, sizeof(out.local_network_version));
+        std::memcpy(&out.runtime_features, runtime, sizeof(out.runtime_features));
+    }
+
+    out.secret_id = reader.read_bit() ? 1 : 0;
+    if (!reader.read_double(out.timestamp))
+        return false;
+
+    if (!reader.read_bits_to_bytes(out.cookie, kHandshakeCookieBytes * 8))
+        return false;
+
+    size_t const after_cookie = reader.pos_bits();
+    size_t const remaining = reader.num_bits() - after_cookie;
+    if (remaining < 1)
+        return false;
+
+    out.padding_bits = remaining - 1;
+    return true;
+}
+
+std::optional<std::string> build_ue_challenge_from_initial(std::string const& initial,
+    ue_pending_challenge_t& pending)
+{
+    ue_parsed_handshake_t parsed{};
+    if (!parse_ue_stateless_handshake(initial, parsed))
+        return std::nullopt;
+
+    if (parsed.packet_type != ue_handshake_packet_type_e::Initial)
+        return std::nullopt;
+
+    if (parsed.padding_bits < 8)
+        parsed.padding_bits = 64;
+
+    fill_random_bytes(pending.cookie, sizeof(pending.cookie));
+    pending.secret_id = 1;
+    pending.timestamp = std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    pending.assigned_client_id = static_cast<uint8_t>((parsed.client_id % 7) + 1);
+
+    ue_bit_writer_t writer;
+    ue_parsed_handshake_t challenge_header = parsed;
+    challenge_header.packet_type = ue_handshake_packet_type_e::Challenge;
+    begin_ue_handshake(writer, ue_handshake_packet_type_e::Challenge, challenge_header, 0);
+
+    writer.write_bit(pending.secret_id != 0);
+    writer.write_double(pending.timestamp);
+    writer.write_bytes(pending.cookie, sizeof(pending.cookie));
+    cap_ue_handshake(writer, parsed);
+
+    return writer.finish();
+}
+
+std::optional<std::string> build_ue_ack_from_response(std::string const& response,
+    ue_parsed_handshake_t const& challenge_state,
+    ue_pending_challenge_t const& pending)
+{
+    ue_parsed_handshake_t parsed{};
+    if (!parse_ue_stateless_handshake(response, parsed))
+        return std::nullopt;
+
+    if (parsed.packet_type != ue_handshake_packet_type_e::Response)
+        return std::nullopt;
+
+    if (parsed.secret_id != pending.secret_id)
+        return std::nullopt;
+
+    if (parsed.timestamp != pending.timestamp)
+        return std::nullopt;
+
+    if (std::memcmp(parsed.cookie, pending.cookie, sizeof(parsed.cookie)) != 0)
+        return std::nullopt;
+
+    ue_bit_writer_t writer;
+    ue_parsed_handshake_t ack_header = challenge_state;
+    ack_header.packet_type = ue_handshake_packet_type_e::Ack;
+    ack_header.client_id = pending.assigned_client_id;
+    begin_ue_handshake(writer, ue_handshake_packet_type_e::Ack, ack_header, 1);
+
+    writer.write_bit(true);
+    writer.write_double(pending.timestamp);
+
+    uint8_t ack_cookie[kHandshakeCookieBytes]{};
+    fill_random_bytes(ack_cookie, sizeof(ack_cookie));
+    writer.write_bytes(ack_cookie, sizeof(ack_cookie));
+    cap_ue_handshake(writer, challenge_state);
+
+    return writer.finish();
+}
+
+struct p2p_peer_travel_stats_t
+{
+    uint32_t sends = 0;
+    uint32_t recvs = 0;
+    uint32_t acks = 0;
+    bool logged_first_recv = false;
+    bool sent_travel_handshake = false;
+    bool recv_travel_handshake = false;
+    bool recv_game_reply_after_handshake = false;
+    bool host_pending_travel_reply = false;
+    bool host_sent_travel_reply = false;
+    bool host_pending_travel_ack = false;
+    bool host_sent_travel_ack = false;
+    std::string travel_initial_packet;
+    std::string travel_response_packet;
+    ue_pending_challenge_t pending_challenge{};
+    std::chrono::steady_clock::time_point travel_handshake_sent{};
+    std::chrono::steady_clock::time_point host_travel_handshake_received{};
+    std::chrono::steady_clock::time_point host_travel_response_received{};
+};
+
+std::unordered_map<std::string, p2p_peer_travel_stats_t> g_p2p_peer_travel_stats;
+
+p2p_peer_travel_stats_t& peer_travel_stats(std::string const& peer)
+{
+    return g_p2p_peer_travel_stats[peer];
+}
+
+bool should_mirror_game_p2p_for_peer(std::string const& peer_id)
+{
+    if (peer_id.empty())
+        return false;
+
+    if (GetEOS_Sessions().local_user_hosts_session_for_peer(peer_id))
+        return true;
+
+    return GetEOS_Lobby().is_peer_member_of_my_owned_lobby(peer_id);
+}
+
+void log_p2p_peer_endpoint(char const* event, std::string const& peer)
+{
+    APP_LOG(Log::LogLevel::INFO, "NET %s peer=%s endpoint=%s",
+        event,
+        peer.c_str(),
+        GetNetwork().format_peer_endpoint(peer).c_str());
+}
+
+void log_ue_handshake_packet(char const* event, std::string const& peer, std::string const& packet)
+{
+    ue_parsed_handshake_t parsed{};
+    if (!parse_ue_stateless_handshake(packet, parsed))
+    {
+        APP_LOG(Log::LogLevel::INFO,
+            "UE handshake %s peer=%s bytes=%zu hex=%s (parse failed)",
+            event,
+            peer.c_str(),
+            packet.size(),
+            format_hex_dump(packet).c_str());
+        return;
+    }
+
+    APP_LOG(Log::LogLevel::INFO,
+        "UE handshake %s peer=%s bytes=%zu type=%u travel=%u client=%u netver=0x%x secret=%u hex=%s",
+        event,
+        peer.c_str(),
+        packet.size(),
+        static_cast<unsigned>(parsed.packet_type),
+        static_cast<unsigned>(parsed.travel_count),
+        static_cast<unsigned>(parsed.client_id),
+        parsed.local_network_version,
+        static_cast<unsigned>(parsed.secret_id),
+        format_hex_dump(packet).c_str());
+}
+
+void note_p2p_send(std::string const& peer, uint8_t channel, uint32_t bytes)
+{
+    auto& stats = peer_travel_stats(peer);
+    ++stats.sends;
+    if (channel == 172 && bytes == 73)
+    {
+        stats.sent_travel_handshake = true;
+        stats.travel_handshake_sent = std::chrono::steady_clock::now();
+        APP_LOG(Log::LogLevel::INFO,
+            "P2P travel handshake SENT peer=%s endpoint=%s channel=172 bytes=73 (waiting UE net reply >5b)",
+            peer.c_str(),
+            GetNetwork().format_peer_endpoint(peer).c_str());
+    }
+
+    if (channel == 172 && bytes > 5 && should_mirror_game_p2p_for_peer(peer))
+    {
+        stats.host_sent_travel_reply = true;
+        stats.host_pending_travel_reply = false;
+        if (stats.host_pending_travel_ack)
+        {
+            stats.host_sent_travel_ack = true;
+            stats.host_pending_travel_ack = false;
+        }
+    }
+}
+
+void note_p2p_recv(std::string const& peer, uint8_t channel, uint32_t bytes)
+{
+    auto& stats = peer_travel_stats(peer);
+    ++stats.recvs;
+
+    if (!stats.logged_first_recv)
+    {
+        stats.logged_first_recv = true;
+        log_p2p_peer_endpoint("P2P first IP datagram received from", peer);
+    }
+
+    if (channel == 172 && bytes == 73)
+    {
+        stats.recv_travel_handshake = true;
+        APP_LOG(Log::LogLevel::INFO,
+            "P2P travel handshake RECEIVED peer=%s endpoint=%s channel=172 bytes=73",
+            peer.c_str(),
+            GetNetwork().format_peer_endpoint(peer).c_str());
+    }
+
+    if (stats.sent_travel_handshake && bytes > 5 &&
+        (channel == 172 || channel == 255))
+    {
+        stats.recv_game_reply_after_handshake = true;
+        APP_LOG(Log::LogLevel::INFO,
+            "P2P travel reply RECEIVED peer=%s endpoint=%s channel=%u bytes=%u",
+            peer.c_str(),
+            GetNetwork().format_peer_endpoint(peer).c_str(),
+            static_cast<unsigned>(channel),
+            bytes);
+    }
+}
+
+void log_p2p_close_summary(std::string const& peer)
+{
+    auto it = g_p2p_peer_travel_stats.find(peer);
+    if (it == g_p2p_peer_travel_stats.end())
+    {
+        log_p2p_peer_endpoint("P2P CloseConnection (no traffic stats)", peer);
+        return;
+    }
+
+    auto const& stats = it->second;
+    APP_LOG(Log::LogLevel::INFO,
+        "P2P CloseConnection summary peer=%s endpoint=%s sends=%u recvs=%u acks=%u "
+        "travel_sent=%s travel_recv=%s ue_reply_after_travel=%s",
+        peer.c_str(),
+        GetNetwork().format_peer_endpoint(peer).c_str(),
+        stats.sends,
+        stats.recvs,
+        stats.acks,
+        stats.sent_travel_handshake ? "yes" : "no",
+        stats.recv_travel_handshake ? "yes" : "no",
+        stats.recv_game_reply_after_handshake ? "yes" : "NO");
+
+    if (stats.sent_travel_handshake && !stats.recv_game_reply_after_handshake)
+    {
+        APP_LOG(Log::LogLevel::INFO,
+            "P2P travel FAILED: IP transport OK (tcp/udp acks seen) but no UE game reply after 73-byte handshake from peer=%s",
+            peer.c_str());
+    }
+
+    g_p2p_peer_travel_stats.erase(it);
+}
+
+void log_p2p_transport(Network::peer_t const& peerid, char const* kind, int channel, size_t bytes, bool ok, char const* via)
+{
+    static std::unordered_map<std::string, uint32_t> send_counts;
+    uint32_t& count = send_counts[peerid + kind];
+    ++count;
+
+    if (std::strcmp(kind, "send") == 0)
+        note_p2p_send(peerid, static_cast<uint8_t>(channel), static_cast<uint32_t>(bytes));
+    else if (std::strcmp(kind, "ack") == 0)
+        ++peer_travel_stats(peerid).acks;
+
+    if (!ok || count <= 30 || (count % 100) == 0 || (bytes == 73 && channel == 172))
+    {
+        APP_LOG(Log::LogLevel::INFO, "P2P %s #%u peer=%s endpoint=%s channel=%d bytes=%zu via=%s ok=%s",
+            kind,
+            count,
+            peerid.c_str(),
+            GetNetwork().format_peer_endpoint(peerid).c_str(),
+            channel,
+            bytes,
+            via,
+            ok ? "yes" : "NO");
+    }
+}
+
+void log_p2p_game_io(char const* direction, std::string const& peer, uint8_t channel, uint32_t bytes)
+{
+    static std::unordered_map<std::string, uint32_t> counts;
+
+    bool const heartbeat = (bytes == 5 && (channel == 172 || channel == 255));
+
+    std::string const key = std::string(direction) + peer + std::to_string(channel);
+    uint32_t& count = counts[key];
+    ++count;
+
+    if (heartbeat)
+    {
+        if (count <= 2 || (count % 250) == 0)
+        {
+            APP_LOG(Log::LogLevel::DEBUG, "P2P %s heartbeat peer=%s channel=%u bytes=%u (#%u)",
+                direction, peer.c_str(), static_cast<unsigned>(channel), bytes, count);
+        }
+        return;
+    }
+
+    APP_LOG(Log::LogLevel::INFO, "P2P %s peer=%s channel=%u bytes=%u endpoint=%s",
+        direction, peer.c_str(), static_cast<unsigned>(channel), bytes,
+        GetNetwork().format_peer_endpoint(peer).c_str());
+
+    if (std::strcmp(direction, "recv") == 0)
+        note_p2p_recv(peer, channel, bytes);
+}
+
+bool send_p2p_network_message(Network::peer_t const& peerid, Network_Message_pb& msg, char const* kind, int channel, size_t payload_bytes)
+{
+    bool const has_tcp = GetNetwork().has_tcp_peer(peerid);
+    char const* via = has_tcp ? "TCP" : "UDP";
+    bool res = GetNetwork().SendToPeer(msg);
+    if (!res)
+    {
+        GetNetwork().ensure_udp_route(peerid);
+        res = GetNetwork().SendToPeer(msg);
+        if (res)
+            via = "UDP";
+    }
+
+    log_p2p_transport(peerid, kind, channel, payload_bytes, res, via);
+    return res;
+}
+
+}
 
 decltype(EOSSDK_P2P::connecting_timeout) EOSSDK_P2P::connecting_timeout;
 decltype(EOSSDK_P2P::connection_timeout) EOSSDK_P2P::connection_timeout;
@@ -51,47 +696,84 @@ EOSSDK_P2P::~EOSSDK_P2P()
 }
 
 
-EOS_P2P_OnPeerConnectionEstablishedInfo* mCachedOpcei = NULL;
-
 void EOSSDK_P2P::set_p2p_state_connected(EOS_ProductUserId remote_id, p2p_state_t& state)
 {
     p2p_state_t::status_e oldStatus = state.status;
     state.status = p2p_state_t::status_e::connected;
+    GetNetwork().ensure_udp_route(remote_id->to_string());
+    log_p2p_peer_endpoint("P2P connected", remote_id->to_string());
+    APP_LOG(Log::LogLevel::INFO, "P2P connected to %s socket=%s",
+        remote_id->to_string().c_str(), state.socket_name.c_str());
     for (auto& out_msgs : state.p2p_out_messages)
     {// Send all previously stored messages
         send_p2p_data(remote_id->to_string(), &out_msgs);
     }
     state.p2p_out_messages.clear();
 
+    EOS_EConnectionEstablishedType const connection_type =
+        oldStatus == p2p_state_t::status_e::connection_loss
+            ? EOS_EConnectionEstablishedType::EOS_CET_Reconnection
+            : EOS_EConnectionEstablishedType::EOS_CET_NewConnection;
+
+    cached_p2p_established_t cached;
+    cached.remote_id = remote_id;
+    cached.socket_name = state.socket_name;
+    cached.connection_type = connection_type;
 
     std::vector<pFrameResult_t> notifs = std::move(GetCB_Manager().get_notifications(this, EOS_P2P_OnPeerConnectionEstablishedInfo::k_iCallback));
-    if (notifs.empty()) {
-        pFrameResult_t res(new FrameResult);
-        mCachedOpcei = &res->CreateCallback<EOS_P2P_OnPeerConnectionEstablishedInfo>((CallbackFunc)NULL);
-        if (oldStatus == p2p_state_t::status_e::connection_loss) {
-            mCachedOpcei->ConnectionType = EOS_EConnectionEstablishedType::EOS_CET_Reconnection;
-        }
-        else mCachedOpcei->ConnectionType = EOS_EConnectionEstablishedType::EOS_CET_NewConnection;
-        mCachedOpcei->RemoteUserId = remote_id;
-        EOS_P2P_SocketId* socketId = new EOS_P2P_SocketId;
-        socketId->ApiVersion = EOS_P2P_SOCKETID_API_LATEST;
-        strncpy(const_cast<char*>(socketId->SocketName), state.socket_name.c_str(), sizeof(EOS_P2P_SocketId::SocketName));
-        mCachedOpcei->SocketId = socketId;
-    }
-    for (auto& notif : notifs)
+    if (notifs.empty())
     {
-        EOS_P2P_OnPeerConnectionEstablishedInfo& opcei = notif->GetCallback<EOS_P2P_OnPeerConnectionEstablishedInfo>();
-        if (oldStatus == p2p_state_t::status_e::connection_loss) {
-            opcei.ConnectionType = EOS_EConnectionEstablishedType::EOS_CET_Reconnection;
-        }
-        else opcei.ConnectionType = EOS_EConnectionEstablishedType::EOS_CET_NewConnection;
-        opcei.RemoteUserId = remote_id;
-        EOS_P2P_SocketId * socketId = new EOS_P2P_SocketId;
-        socketId->ApiVersion = EOS_P2P_SOCKETID_API_LATEST;
-        strncpy(const_cast<char*>(socketId->SocketName), state.socket_name.c_str(), sizeof(EOS_P2P_SocketId::SocketName));
-        opcei.SocketId = socketId;
-        mCachedOpcei = &opcei;
-        notif->GetFunc()(notif->GetFuncParam());
+        g_cached_p2p_established = std::make_unique<cached_p2p_established_t>(cached);
+    }
+    else
+    {
+        for (auto& notif : notifs)
+            queue_peer_connection_established(this, notif, cached);
+    }
+}
+
+void EOSSDK_P2P::ensure_peer_connection(std::string const& peer_id, std::string const& socket_name)
+{
+    TRACE_FUNC();
+    GLOBAL_LOCK();
+
+    if (peer_id.empty())
+        return;
+
+    EOS_ProductUserId remote_id = GetProductUserId(peer_id);
+    if (remote_id == nullptr)
+        return;
+
+    p2p_state_t& state = _p2p_connections[remote_id];
+    if (state.status == p2p_state_t::status_e::connected)
+        return;
+
+    if (!socket_name.empty())
+        state.socket_name = socket_name;
+    else if (state.socket_name.empty())
+        state.socket_name = "EOSP2PTransport";
+
+    if (state.status == p2p_state_t::status_e::requesting)
+    {
+        APP_LOG(Log::LogLevel::INFO, "Auto-accepting P2P connection from %s", peer_id.c_str());
+        P2P_Connect_Response_pb* resp = new P2P_Connect_Response_pb;
+        resp->set_accepted(true);
+        send_p2p_connection_response(peer_id, resp);
+        set_p2p_state_connected(remote_id, state);
+        GetNetwork().ensure_udp_route(peer_id);
+        return;
+    }
+
+    if (state.status == p2p_state_t::status_e::closed ||
+        state.status == p2p_state_t::status_e::connecting)
+    {
+        APP_LOG(Log::LogLevel::INFO, "Initiating P2P connection to %s", peer_id.c_str());
+        state.status = p2p_state_t::status_e::connecting;
+        state.connection_loss_start = std::chrono::steady_clock::now();
+        P2P_Connect_Request_pb* req = new P2P_Connect_Request_pb;
+        req->set_socket_name(state.socket_name);
+        send_p2p_connection_request(peer_id, req);
+        GetNetwork().ensure_udp_route(peer_id);
     }
 }
 
@@ -118,6 +800,15 @@ EOS_EResult EOSSDK_P2P::SendPacket(const EOS_P2P_SendPacketOptions* Options)
     
     if (Options == nullptr || Options->RemoteUserId == nullptr || Options->Data == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
+
+    if (Settings::Inst().steam_passthrough)
+    {
+        APP_LOG(Log::LogLevel::INFO, "P2P SendPacket ignored in steam_passthrough peer=%s channel=%u bytes=%u",
+            Options->RemoteUserId->to_string().c_str(),
+            static_cast<unsigned>(Options->Channel),
+            Options->DataLengthBytes);
+        return EOS_EResult::EOS_Success;
+    }
 
     p2p_state_t& p2p_state = _p2p_connections[Options->RemoteUserId];
     P2P_Data_Message_pb data;
@@ -153,10 +844,25 @@ EOS_EResult EOSSDK_P2P::SendPacket(const EOS_P2P_SendPacketOptions* Options)
 
         case p2p_state_t::status_e::connected:
         {// We're connected, send the message now
-            send_p2p_data(Options->RemoteUserId->to_string(), &data);
-            if (mCachedOpcei != NULL) {
+            if (Options->Channel == 255 &&
+                should_mirror_game_p2p_for_peer(Options->RemoteUserId->to_string()))
+            {
+                // Host UE net driver sends on ch255; joiner listens on ch172 only.
+                P2P_Data_Message_pb mirror = data;
+                mirror.set_channel(172);
+                send_p2p_data(Options->RemoteUserId->to_string(), &mirror);
+                log_p2p_game_io("send redirect ch255->ch172", Options->RemoteUserId->to_string(), 172,
+                    Options->DataLengthBytes);
+            }
+            else
+            {
+                send_p2p_data(Options->RemoteUserId->to_string(), &data);
+            }
+
+            if (g_cached_p2p_established != nullptr)
+            {
                 set_p2p_state_connected(Options->RemoteUserId, p2p_state);
-                mCachedOpcei = NULL;
+                g_cached_p2p_established.reset();
             }
         }
         break;
@@ -205,18 +911,21 @@ EOS_EResult EOSSDK_P2P::GetNextReceivedPacketSize(const EOS_P2P_GetNextReceivedP
     if (Options == nullptr || OutPacketSizeBytes == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
+    if (Settings::Inst().steam_passthrough)
+    {
+        *OutPacketSizeBytes = 0;
+        return EOS_EResult::EOS_NotFound;
+    }
+
     bool has_packet = false;
     if (Options->RequestedChannel == nullptr)
     {
-        for (auto& in_msgs : _p2p_in_messages)
+        if (!_p2p_in_messages_fifo.empty())
         {
-            if (!in_msgs.second.empty())
-            {
-                auto& front = in_msgs.second.front();
-                *OutPacketSizeBytes = static_cast<uint32_t>(front.data().length());
-                next_requested_channel = front.channel();
-                has_packet = true;
-            }
+            auto const& front = _p2p_in_messages_fifo.front();
+            *OutPacketSizeBytes = static_cast<uint32_t>(front.data().length());
+            next_requested_channel = front.channel();
+            has_packet = true;
         }
     }
     else
@@ -262,33 +971,34 @@ EOS_EResult EOSSDK_P2P::ReceivePacket(const EOS_P2P_ReceivePacketOptions* Option
         return EOS_EResult::EOS_InvalidParameters;
     }
 
-    if (Options->RequestedChannel != nullptr)
-        next_requested_channel = *Options->RequestedChannel;
-
-    std::list<P2P_Data_Message_pb> *queue = nullptr;
-    if (next_requested_channel == -1)
-    {// No channel, get the next available message
-        auto it = std::find_if(_p2p_in_messages.begin(), _p2p_in_messages.end(), []( std::pair<uint8_t const, std::list<P2P_Data_Message_pb>>& messages_queue)
-        {
-            return !messages_queue.second.empty();
-        });
-        if (it != _p2p_in_messages.end())
-            queue = &it->second;
-    }
-    else
+    if (Settings::Inst().steam_passthrough)
     {
-        queue = &_p2p_in_messages[next_requested_channel];
-        if (queue->empty())
-        {
-            queue = nullptr;
-        }
-    }
-    if (queue == nullptr)
-    {
+        *OutBytesWritten = 0;
         return EOS_EResult::EOS_NotFound;
     }
 
-    auto& msg = queue->front();
+    if (Options->RequestedChannel != nullptr)
+        next_requested_channel = *Options->RequestedChannel;
+
+    bool const use_fifo = (Options->RequestedChannel == nullptr && next_requested_channel == -1);
+
+    uint8_t channel = 0;
+    if (use_fifo)
+    {
+        if (_p2p_in_messages_fifo.empty())
+            return EOS_EResult::EOS_NotFound;
+        channel = _p2p_in_messages_fifo.front().channel();
+    }
+    else
+    {
+        channel = static_cast<uint8_t>(next_requested_channel);
+    }
+
+    auto ch_it = _p2p_in_messages.find(channel);
+    if (ch_it == _p2p_in_messages.end() || ch_it->second.empty())
+        return EOS_EResult::EOS_NotFound;
+
+    auto& msg = ch_it->second.front();
 
     *OutPeerId = GetProductUserId(msg.user_id());
     *OutBytesWritten = static_cast<uint32_t>(msg.data().copy(reinterpret_cast<char*>(OutData), Options->MaxDataSizeBytes));
@@ -297,7 +1007,26 @@ EOS_EResult EOSSDK_P2P::ReceivePacket(const EOS_P2P_ReceivePacketOptions* Option
     *OutChannel = msg.channel();
     next_requested_channel = -1;
 
-    queue->pop_front();
+    log_p2p_game_io("ReceivePacket", msg.user_id(), *OutChannel, *OutBytesWritten);
+
+    ch_it->second.pop_front();
+
+    if (use_fifo)
+    {
+        if (!_p2p_in_messages_fifo.empty())
+            _p2p_in_messages_fifo.pop_front();
+    }
+    else
+    {
+        for (auto it = _p2p_in_messages_fifo.begin(); it != _p2p_in_messages_fifo.end(); ++it)
+        {
+            if (it->channel() == channel)
+            {
+                _p2p_in_messages_fifo.erase(it);
+                break;
+            }
+        }
+    }
 
     return EOS_EResult::EOS_Success;
 }
@@ -374,14 +1103,20 @@ EOS_NotificationId EOSSDK_P2P::AddNotifyPeerConnectionEstablished(const EOS_P2P_
     opcei.ConnectionType = EOS_EConnectionEstablishedType::EOS_CET_Reconnection;
     opcei.NetworkType = EOS_ENetworkConnectionType::EOS_NCT_DirectConnection;
 
-    if (mCachedOpcei != NULL) {
-        opcei.RemoteUserId = mCachedOpcei->RemoteUserId;
-        opcei.SocketId = mCachedOpcei->SocketId;
-        opcei.ConnectionType = mCachedOpcei->ConnectionType;
-        res->GetFunc()(res->GetFuncParam());
+    EOS_NotificationId const id = GetCB_Manager().add_notification(this, res);
+
+    if (g_cached_p2p_established != nullptr)
+    {
+        pFrameResult_t delivery(new FrameResult);
+        EOS_P2P_OnPeerConnectionEstablishedInfo& delivery_info =
+            delivery->CreateCallback<EOS_P2P_OnPeerConnectionEstablishedInfo>((CallbackFunc)ConnectionEstablishedHandler);
+        delivery_info.ClientData = ClientData;
+        delivery_info.LocalUserId = Settings::Inst().productuserid;
+        queue_peer_connection_established(this, delivery, *g_cached_p2p_established);
+        g_cached_p2p_established.reset();
     }
 
-    return GetCB_Manager().add_notification(this, res);
+    return id;
 }
 
 
@@ -503,6 +1238,11 @@ EOS_EResult EOSSDK_P2P::AcceptConnection(const EOS_P2P_AcceptConnectionOptions* 
     
     auto& conn = _p2p_connections[Options->RemoteUserId];
 
+    if (Options->SocketId != nullptr && Options->SocketId->SocketName[0] != '\0')
+        conn.socket_name = Options->SocketId->SocketName;
+    else if (conn.socket_name.empty())
+        conn.socket_name = "EOSP2PTransport";
+
     if (conn.status == p2p_state_t::status_e::requesting)
     {
         P2P_Connect_Response_pb* resp = new P2P_Connect_Response_pb;
@@ -525,15 +1265,24 @@ EOS_EResult EOSSDK_P2P::AcceptConnection(const EOS_P2P_AcceptConnectionOptions* 
 EOS_EResult EOSSDK_P2P::CloseConnection(const EOS_P2P_CloseConnectionOptions* Options)
 {
     TRACE_FUNC();
-    APP_LOG(Log::LogLevel::DEBUG, "TODO");
     GLOBAL_LOCK();
     
     if (Options == nullptr || Options->RemoteUserId == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
+    if (Settings::Inst().steam_passthrough)
+    {
+        APP_LOG(Log::LogLevel::INFO, "P2P CloseConnection ignored in steam_passthrough peer=%s",
+            Options->RemoteUserId->to_string().c_str());
+        return EOS_EResult::EOS_Success;
+    }
+
     if (Options->SocketId == nullptr)
     {
         auto& conn = _p2p_connections[Options->RemoteUserId];
+        APP_LOG(Log::LogLevel::INFO, "P2P CloseConnection requested peer=%s socket=<all> prev_state=%d",
+            Options->RemoteUserId->to_string().c_str(),
+            static_cast<int>(conn.status));
         conn.p2p_out_messages.clear();
         for (auto& in_msgs : _p2p_in_messages)
         {
@@ -545,6 +1294,11 @@ EOS_EResult EOSSDK_P2P::CloseConnection(const EOS_P2P_CloseConnectionOptions* Op
 
         if (conn.status != p2p_state_t::status_e::closed)
         {
+            log_p2p_close_summary(Options->RemoteUserId->to_string());
+            APP_LOG(Log::LogLevel::INFO, "P2P CloseConnection peer=%s socket=%s prev_state=%d",
+                Options->RemoteUserId->to_string().c_str(),
+                conn.socket_name.c_str(),
+                static_cast<int>(conn.status));
             conn.status = p2p_state_t::status_e::closed;
 
             P2P_Connection_Close_pb* close = new P2P_Connection_Close_pb;
@@ -555,6 +1309,10 @@ EOS_EResult EOSSDK_P2P::CloseConnection(const EOS_P2P_CloseConnectionOptions* Op
     {
         std::string target_sock_name = Options->SocketId->SocketName;
         auto& conn = _p2p_connections[Options->RemoteUserId];
+        APP_LOG(Log::LogLevel::INFO, "P2P CloseConnection requested peer=%s socket=%s prev_state=%d",
+            Options->RemoteUserId->to_string().c_str(),
+            target_sock_name.c_str(),
+            static_cast<int>(conn.status));
         conn.p2p_out_messages.clear();
         for (auto& in_msgs : _p2p_in_messages)
         {
@@ -568,6 +1326,7 @@ EOS_EResult EOSSDK_P2P::CloseConnection(const EOS_P2P_CloseConnectionOptions* Op
         {
             if (conn.socket_name == target_sock_name)
             {
+                log_p2p_close_summary(Options->RemoteUserId->to_string());
                 conn.status = p2p_state_t::status_e::closed;
 
                 P2P_Connection_Close_pb* close = new P2P_Connection_Close_pb;
@@ -759,7 +1518,7 @@ bool EOSSDK_P2P::send_p2p_connection_request(Network::peer_t const& peerid, P2P_
 
     msg.set_source_id(user_id);
     msg.set_dest_id(peerid);
-    msg.set_game_id(Settings::Inst().appid);
+    msg.set_game_id(Settings::Inst().network_game_id());
 
     msg.set_allocated_p2p(p2p);
 
@@ -778,7 +1537,7 @@ bool EOSSDK_P2P::send_p2p_connection_response(Network::peer_t const& peerid, P2P
 
     msg.set_source_id(user_id);
     msg.set_dest_id(peerid);
-    msg.set_game_id(Settings::Inst().appid);
+    msg.set_game_id(Settings::Inst().network_game_id());
 
     msg.set_allocated_p2p(p2p);
 
@@ -797,12 +1556,15 @@ bool EOSSDK_P2P::send_p2p_data(Network::peer_t const& peerid, P2P_Data_Message_p
 
     msg.set_source_id(user_id);
     msg.set_dest_id(peerid);
-    msg.set_game_id(Settings::Inst().appid);
+    msg.set_game_id(Settings::Inst().network_game_id());
 
     msg.set_allocated_p2p(p2p);
-    auto res = GetNetwork().UDPSendTo(msg);
 
-    p2p->release_data_message();
+    size_t const payload_bytes = p2p->has_data_message() ? p2p->data_message().data().size() : 0;
+    int const channel = p2p->has_data_message() ? static_cast<int>(p2p->data_message().channel()) : -1;
+    auto res = send_p2p_network_message(peerid, msg, "send", channel, payload_bytes);
+
+    (void)p2p->release_data_message();
 
     return res;
 }
@@ -819,11 +1581,12 @@ bool EOSSDK_P2P::send_p2p_data_ack(Network::peer_t const& peerid, P2P_Data_Ackno
 
     msg.set_source_id(user_id);
     msg.set_dest_id(peerid);
-    msg.set_game_id(Settings::Inst().appid);
+    msg.set_game_id(Settings::Inst().network_game_id());
 
     msg.set_allocated_p2p(p2p);
 
-    return GetNetwork().UDPSendTo(msg);
+    int const channel = p2p->has_data_acknowledge() ? static_cast<int>(p2p->data_acknowledge().channel()) : -1;
+    return send_p2p_network_message(peerid, msg, "ack", channel, 0);
 }
 
 bool EOSSDK_P2P::send_p2p_connetion_close(Network::peer_t const& peerid, P2P_Connection_Close_pb* close) const
@@ -838,7 +1601,7 @@ bool EOSSDK_P2P::send_p2p_connetion_close(Network::peer_t const& peerid, P2P_Con
 
     msg.set_source_id(user_id);
     msg.set_dest_id(peerid);
-    msg.set_game_id(Settings::Inst().appid);
+    msg.set_game_id(Settings::Inst().network_game_id());
 
     msg.set_allocated_p2p(p2p);
 
@@ -915,6 +1678,25 @@ bool EOSSDK_P2P::on_p2p_connection_request(Network_Message_pb const& msg, P2P_Co
 
             notif->GetFunc()(notif->GetFuncParam());
         }
+
+        for (auto const& entry : GetEOS_Sessions()._sessions)
+        {
+            session_state_t const* session = &entry.second;
+            if (GetEOS_Sessions().is_player_in_session(msg.source_id(), const_cast<session_state_t*>(session)) ||
+                GetEOS_Sessions().is_player_registered(msg.source_id(), const_cast<session_state_t*>(session)))
+            {
+                APP_LOG(Log::LogLevel::INFO, "Auto-accepting P2P for session member %s", msg.source_id().c_str());
+                ensure_peer_connection(msg.source_id(), req.socket_name());
+                break;
+            }
+        }
+
+        if (conn.status == p2p_state_t::status_e::requesting &&
+            GetEOS_Lobby().is_peer_member_of_my_owned_lobby(msg.source_id()))
+        {
+            APP_LOG(Log::LogLevel::INFO, "Auto-accepting P2P for lobby member %s", msg.source_id().c_str());
+            ensure_peer_connection(msg.source_id(), req.socket_name());
+        }
     }
     else
     {
@@ -975,6 +1757,43 @@ bool EOSSDK_P2P::on_p2p_data(Network_Message_pb const& msg, P2P_Data_Message_pb 
             ack->set_channel(data.channel());
             ack->set_accepted(true);
             _p2p_in_messages[data.channel()].emplace_back(data);
+            _p2p_in_messages_fifo.push_back(data);
+            log_p2p_game_io("recv", msg.source_id(), static_cast<uint8_t>(data.channel()),
+                static_cast<uint32_t>(data.data().size()));
+
+            // Redpoint/UE: joiner sends on ch172; host game listens on ch255.
+            if (data.channel() == 172 &&
+                should_mirror_game_p2p_for_peer(msg.source_id()))
+            {
+                auto& travel_stats = peer_travel_stats(msg.source_id());
+                if (static_cast<uint32_t>(data.data().size()) == 73)
+                {
+                    travel_stats.host_pending_travel_reply = true;
+                    travel_stats.host_travel_handshake_received = std::chrono::steady_clock::now();
+                    travel_stats.travel_initial_packet = data.data();
+                    log_ue_handshake_packet("Initial recv", msg.source_id(), data.data());
+                }
+                else if (travel_stats.host_sent_travel_reply &&
+                         static_cast<uint32_t>(data.data().size()) > 5)
+                {
+                    ue_parsed_handshake_t parsed{};
+                    if (parse_ue_stateless_handshake(data.data(), parsed) &&
+                        parsed.packet_type == ue_handshake_packet_type_e::Response)
+                    {
+                        travel_stats.host_pending_travel_ack = true;
+                        travel_stats.host_travel_response_received = std::chrono::steady_clock::now();
+                        travel_stats.travel_response_packet = data.data();
+                        log_ue_handshake_packet("Response recv", msg.source_id(), data.data());
+                    }
+                }
+
+                P2P_Data_Message_pb mirror = data;
+                mirror.set_channel(255);
+                _p2p_in_messages[255].emplace_back(mirror);
+                _p2p_in_messages_fifo.push_back(mirror);
+                log_p2p_game_io("recv redirect ch172->ch255", msg.source_id(), 255,
+                    static_cast<uint32_t>(data.data().size()));
+            }
         }
         break;
 
@@ -1040,6 +1859,8 @@ bool EOSSDK_P2P::CBRunFrame()
                 auto now = std::chrono::steady_clock::now();
                 if ((now - it->second.connection_loss_start) > connecting_timeout)
                 {
+                    APP_LOG(Log::LogLevel::INFO, "P2P connect timeout peer=%s socket=%s",
+                        it->first->to_string().c_str(), it->second.socket_name.c_str());
                     it->second.status = p2p_state_t::status_e::closed;
                     it->second.p2p_out_messages.clear();
 
@@ -1076,6 +1897,87 @@ bool EOSSDK_P2P::CBRunFrame()
                 }
             }
             break;
+        }
+    }
+
+    auto const now = std::chrono::steady_clock::now();
+    for (auto& entry : g_p2p_peer_travel_stats)
+    {
+        auto& stats = entry.second;
+        if (!should_mirror_game_p2p_for_peer(entry.first))
+            continue;
+
+        EOS_ProductUserId remote_id = GetProductUserId(entry.first);
+        if (remote_id == nullptr)
+            continue;
+
+        auto conn_it = _p2p_connections.find(remote_id);
+        if (conn_it == _p2p_connections.end() ||
+            conn_it->second.status != p2p_state_t::status_e::connected)
+        {
+            continue;
+        }
+
+        auto send_proxy_packet = [&](uint8_t channel, std::string const& payload, char const* log_tag)
+        {
+            P2P_Data_Message_pb* reply = new P2P_Data_Message_pb;
+            reply->set_channel(channel);
+            reply->set_data(payload);
+            reply->set_socket_name(conn_it->second.socket_name.empty() ? "EOSP2PTransport" : conn_it->second.socket_name);
+            reply->set_user_id(Settings::Inst().productuserid->to_string());
+            send_p2p_data(entry.first, reply);
+
+            APP_LOG(Log::LogLevel::INFO,
+                "P2P game channel proxy ch172 %s peer=%s endpoint=%s bytes=%zu hex=%s",
+                log_tag,
+                entry.first.c_str(),
+                GetNetwork().format_peer_endpoint(entry.first).c_str(),
+                payload.size(),
+                format_hex_dump(payload).c_str());
+        };
+
+        if (stats.host_pending_travel_reply && !stats.host_sent_travel_reply &&
+            (now - stats.host_travel_handshake_received) >= std::chrono::milliseconds(400) &&
+            !stats.travel_initial_packet.empty())
+        {
+            auto challenge = build_ue_challenge_from_initial(stats.travel_initial_packet, stats.pending_challenge);
+            if (!challenge.has_value())
+            {
+                APP_LOG(Log::LogLevel::WARN,
+                    "UE handshake Challenge synthesis failed peer=%s initial_bytes=%zu hex=%s",
+                    entry.first.c_str(),
+                    stats.travel_initial_packet.size(),
+                    format_hex_dump(stats.travel_initial_packet).c_str());
+                stats.host_pending_travel_reply = false;
+                continue;
+            }
+
+            log_ue_handshake_packet("Challenge synth", entry.first, *challenge);
+            send_proxy_packet(172, *challenge, "UE Challenge reply");
+            stats.host_pending_travel_reply = false;
+            stats.host_sent_travel_reply = true;
+        }
+
+        if (stats.host_pending_travel_ack && !stats.host_sent_travel_ack &&
+            (now - stats.host_travel_response_received) >= std::chrono::milliseconds(400) &&
+            !stats.travel_initial_packet.empty() &&
+            !stats.travel_response_packet.empty())
+        {
+            ue_parsed_handshake_t initial_parsed{};
+            if (!parse_ue_stateless_handshake(stats.travel_initial_packet, initial_parsed))
+                continue;
+
+            auto ack = build_ue_ack_from_response(
+                stats.travel_response_packet,
+                initial_parsed,
+                stats.pending_challenge);
+            if (!ack.has_value())
+                continue;
+
+            log_ue_handshake_packet("Ack synth", entry.first, *ack);
+            send_proxy_packet(172, *ack, "UE Ack reply");
+            stats.host_pending_travel_ack = false;
+            stats.host_sent_travel_ack = true;
         }
     }
 
@@ -1138,6 +2040,12 @@ void EOSSDK_P2P::FreeCallback(pFrameResult_t res)
         case EOS_P2P_OnRemoteConnectionClosedInfo::k_iCallback:
         {
             EOS_P2P_OnRemoteConnectionClosedInfo& callback = res->GetCallback<EOS_P2P_OnRemoteConnectionClosedInfo>();
+            delete callback.SocketId;
+        }
+        break;
+        case EOS_P2P_OnPeerConnectionEstablishedInfo::k_iCallback:
+        {
+            EOS_P2P_OnPeerConnectionEstablishedInfo& callback = res->GetCallback<EOS_P2P_OnPeerConnectionEstablishedInfo>();
             delete callback.SocketId;
         }
         break;

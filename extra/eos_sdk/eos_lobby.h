@@ -392,6 +392,20 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Lobby_CopyLobbyDetailsHandle(EOS_HLobby Handle
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Lobby_GetRTCRoomName(EOS_HLobby Handle, const EOS_Lobby_GetRTCRoomNameOptions* Options, char* OutBuffer, uint32_t* InOutBufferLength);
 
 /**
+ * Join the RTC Room associated with a lobby.
+ *
+ * @see EOS_Lobby_OnJoinRTCRoomCallback
+ */
+EOS_DECLARE_FUNC(void) EOS_Lobby_JoinRTCRoom(EOS_HLobby Handle, const EOS_Lobby_JoinRTCRoomOptions* Options, void* ClientData, const EOS_Lobby_OnJoinRTCRoomCallback CompletionDelegate);
+
+/**
+ * Leave the RTC Room associated with a lobby.
+ *
+ * @see EOS_Lobby_OnLeaveRTCRoomCallback
+ */
+EOS_DECLARE_FUNC(void) EOS_Lobby_LeaveRTCRoom(EOS_HLobby Handle, const EOS_Lobby_LeaveRTCRoomOptions* Options, void* ClientData, const EOS_Lobby_OnLeaveRTCRoomCallback CompletionDelegate);
+
+/**
  * Get the current connection status of the RTC Room for a lobby.
  *
  * The RTC Room connection status is independent of the lobby connection status, however the lobby system will attempt to keep

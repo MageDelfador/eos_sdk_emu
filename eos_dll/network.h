@@ -65,10 +65,12 @@ private:
 #endif
 
     bool _advertise;
+    bool _network_running;
     std::chrono::milliseconds _advertise_rate;
     std::chrono::steady_clock::time_point _last_advertise;
     std::set<peer_t> _my_peer_ids;
     uint16_t _tcp_port;
+    uint16_t _udp_port;
 
     fd_set readfds, writefds, exceptfds;
     PortableAPI::udp_socket _udp_socket;
@@ -82,6 +84,7 @@ private:
     PortableAPI::tcp_socket _tcp_self_send;
     tcp_buffer_t _tcp_self_recv;
     std::map<peer_t, PortableAPI::tcp_socket*> _tcp_peers;
+    std::unordered_map<peer_t, std::string> _peer_ipv4_cache;
 
     std::map<Network_Message_pb::MessagesCase, std::map<channel_t, std::vector<IRunNetwork*>>> _network_listeners;
 
@@ -151,4 +154,12 @@ public:
 
     std::set<peer_t> TCPSendToAllPeers(Network_Message_pb& msg);
     bool TCPSendTo(Network_Message_pb& msg);
+    bool SendToPeer(Network_Message_pb& msg);
+
+    void remember_peer_ipv4(peer_t const& peer_id, std::string const& ip);
+    bool try_get_peer_ipv4(peer_t const& peer_id, std::string& out_ip);
+    std::string format_peer_endpoint(peer_t const& peer_id);
+    bool has_tcp_peer(peer_t const& peer_id);
+    void seed_udp_route(peer_t const& peer_id, std::string const& ip);
+    void ensure_udp_route(peer_t const& peer_id);
 };

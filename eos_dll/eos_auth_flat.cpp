@@ -18,11 +18,13 @@
  */
 
 #include "eossdk_auth.h"
+#include "eos_api_trace.h"
 
 using namespace sdk;
 
 EOS_DECLARE_FUNC(void) EOS_Auth_Login(EOS_HAuth Handle, const EOS_Auth_LoginOptions* Options, void* ClientData, const EOS_Auth_OnLoginCallback CompletionDelegate)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return;
 
@@ -32,6 +34,7 @@ EOS_DECLARE_FUNC(void) EOS_Auth_Login(EOS_HAuth Handle, const EOS_Auth_LoginOpti
 
 EOS_DECLARE_FUNC(void) EOS_Auth_Logout(EOS_HAuth Handle, const EOS_Auth_LogoutOptions* Options, void* ClientData, const EOS_Auth_OnLogoutCallback CompletionDelegate)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return;
 
@@ -41,6 +44,7 @@ EOS_DECLARE_FUNC(void) EOS_Auth_Logout(EOS_HAuth Handle, const EOS_Auth_LogoutOp
 
 EOS_DECLARE_FUNC(void) EOS_Auth_LinkAccount(EOS_HAuth Handle, const EOS_Auth_LinkAccountOptions* Options, void* ClientData, const EOS_Auth_OnLinkAccountCallback CompletionDelegate)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return;
 
@@ -50,6 +54,7 @@ EOS_DECLARE_FUNC(void) EOS_Auth_LinkAccount(EOS_HAuth Handle, const EOS_Auth_Lin
 
 EOS_DECLARE_FUNC(void) EOS_Auth_DeletePersistentAuth(EOS_HAuth Handle, const EOS_Auth_DeletePersistentAuthOptions* Options, void* ClientData, const EOS_Auth_OnDeletePersistentAuthCallback CompletionDelegate)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return;
 
@@ -59,6 +64,7 @@ EOS_DECLARE_FUNC(void) EOS_Auth_DeletePersistentAuth(EOS_HAuth Handle, const EOS
 
 EOS_DECLARE_FUNC(void) EOS_Auth_VerifyUserAuth(EOS_HAuth Handle, const EOS_Auth_VerifyUserAuthOptions* Options, void* ClientData, const EOS_Auth_OnVerifyUserAuthCallback CompletionDelegate)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return;
 
@@ -68,6 +74,7 @@ EOS_DECLARE_FUNC(void) EOS_Auth_VerifyUserAuth(EOS_HAuth Handle, const EOS_Auth_
 
 EOS_DECLARE_FUNC(int32_t) EOS_Auth_GetLoggedInAccountsCount(EOS_HAuth Handle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return 0;
 
@@ -77,6 +84,7 @@ EOS_DECLARE_FUNC(int32_t) EOS_Auth_GetLoggedInAccountsCount(EOS_HAuth Handle)
 
 EOS_DECLARE_FUNC(EOS_EpicAccountId) EOS_Auth_GetLoggedInAccountByIndex(EOS_HAuth Handle, int32_t Index)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return nullptr;
 
@@ -86,6 +94,7 @@ EOS_DECLARE_FUNC(EOS_EpicAccountId) EOS_Auth_GetLoggedInAccountByIndex(EOS_HAuth
 
 EOS_DECLARE_FUNC(EOS_ELoginStatus) EOS_Auth_GetLoginStatus(EOS_HAuth Handle, EOS_EpicAccountId LocalUserId)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_ELoginStatus::EOS_LS_NotLoggedIn;
 
@@ -95,6 +104,7 @@ EOS_DECLARE_FUNC(EOS_ELoginStatus) EOS_Auth_GetLoginStatus(EOS_HAuth Handle, EOS
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Auth_CopyUserAuthTokenOld(EOS_HAuth Handle, EOS_AccountId LocalUserId, EOS_Auth_Token** OutUserAuthToken)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -104,6 +114,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Auth_CopyUserAuthTokenOld(EOS_HAuth Handle, EO
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Auth_CopyUserAuthTokenNew(EOS_HAuth Handle, const EOS_Auth_CopyUserAuthTokenOptions* Options, EOS_EpicAccountId LocalUserId, EOS_Auth_Token** OutUserAuthToken)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -118,9 +129,12 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Auth_CopyUserAuthTokenNew(EOS_HAuth Handle, co
 #if defined(__WINDOWS_32__)
 #pragma comment(linker, "/export:_EOS_Auth_CopyUserAuthToken@16=_EOS_Auth_CopyUserAuthTokenNew@16")
 #pragma comment(linker, "/export:_EOS_Auth_CopyUserAuthToken@12=_EOS_Auth_CopyUserAuthTokenOld@12")
+#elif defined(_MSC_VER) && defined(_WIN64)
+#pragma comment(linker, "/export:EOS_Auth_CopyUserAuthToken=EOS_Auth_CopyUserAuthTokenNew")
 #else
 EOS_DECLARE_FUNC(EOS_EResult) CLANG_GCC_DONT_OPTIMIZE EOS_Auth_CopyUserAuthToken()
 {
+    EOS_API_TRACE();
     // Build rewrittable opcodes, need 14 for x64 absolute jmp and 5 for x86 relative jmp
     EOS_Auth_CopyUserAuthTokenOld(nullptr, nullptr, nullptr);
     EOS_Auth_CopyUserAuthTokenOld(nullptr, nullptr, nullptr);
@@ -135,6 +149,7 @@ EOS_DECLARE_FUNC(EOS_EResult) CLANG_GCC_DONT_OPTIMIZE EOS_Auth_CopyUserAuthToken
 
 EOS_DECLARE_FUNC(EOS_NotificationId) EOS_Auth_AddNotifyLoginStatusChangedOld(EOS_HAuth Handle, void* ClientData, const EOS_Auth_OnLoginStatusChangedCallback Notification)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_INVALID_NOTIFICATIONID;
 
@@ -144,6 +159,7 @@ EOS_DECLARE_FUNC(EOS_NotificationId) EOS_Auth_AddNotifyLoginStatusChangedOld(EOS
 
 EOS_DECLARE_FUNC(EOS_NotificationId) EOS_Auth_AddNotifyLoginStatusChangedNew(EOS_HAuth Handle, const EOS_Auth_AddNotifyLoginStatusChangedOptions* Options, void* ClientData, const EOS_Auth_OnLoginStatusChangedCallback Notification)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_INVALID_NOTIFICATIONID;
 
@@ -157,9 +173,12 @@ EOS_DECLARE_FUNC(EOS_NotificationId) EOS_Auth_AddNotifyLoginStatusChangedNew(EOS
 #if defined(__WINDOWS_32__)
 #pragma comment(linker, "/export:_EOS_Auth_AddNotifyLoginStatusChanged@16=_EOS_Auth_AddNotifyLoginStatusChangedNew@16")
 #pragma comment(linker, "/export:_EOS_Auth_AddNotifyLoginStatusChanged@12=_EOS_Auth_AddNotifyLoginStatusChangedOld@12")
+#elif defined(_MSC_VER) && defined(_WIN64)
+#pragma comment(linker, "/export:EOS_Auth_AddNotifyLoginStatusChanged=EOS_Auth_AddNotifyLoginStatusChangedNew")
 #else
 EOS_DECLARE_FUNC(EOS_NotificationId) CLANG_GCC_DONT_OPTIMIZE EOS_Auth_AddNotifyLoginStatusChanged()
 {
+    EOS_API_TRACE();
     // Build rewrittable opcodes, need 14 for x64 absolute jmp and 5 for x86 relative jmp
     EOS_Auth_AddNotifyLoginStatusChangedOld(nullptr, nullptr, nullptr);
     EOS_Auth_AddNotifyLoginStatusChangedOld(nullptr, nullptr, nullptr);
@@ -174,6 +193,7 @@ EOS_DECLARE_FUNC(EOS_NotificationId) CLANG_GCC_DONT_OPTIMIZE EOS_Auth_AddNotifyL
 
 EOS_DECLARE_FUNC(void) EOS_Auth_RemoveNotifyLoginStatusChanged(EOS_HAuth Handle, EOS_NotificationId InId)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return;
 
@@ -184,6 +204,7 @@ EOS_DECLARE_FUNC(void) EOS_Auth_RemoveNotifyLoginStatusChanged(EOS_HAuth Handle,
 
 EOS_DECLARE_FUNC(void) EOS_Auth_Token_Release(EOS_Auth_Token* AuthToken)
 {
+    EOS_API_TRACE();
     TRACE_FUNC();
     if (AuthToken == nullptr)
         return;

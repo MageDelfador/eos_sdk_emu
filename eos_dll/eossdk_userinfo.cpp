@@ -22,14 +22,91 @@
 #include "eos_client_api.h"
 #include "settings.h"
 
+#include <cstring>
+
 namespace sdk
 {
+
+namespace
+{
+char* dup_cstr(std::string const& s)
+{
+    if (s.empty())
+        return nullptr;
+    char* out = new char[s.size() + 1];
+    std::memcpy(out, s.c_str(), s.size() + 1);
+    return out;
+}
+
+void fill_userinfo_strings(EOS_UserInfo002* infos, UserInfo_Info_pb const* userinfo)
+{
+    infos->Country = dup_cstr(userinfo->country());
+    infos->PreferredLanguage = dup_cstr(userinfo->preferredlanguage());
+    infos->DisplayName = dup_cstr(userinfo->displayname());
+    infos->Nickname = dup_cstr(userinfo->nickname());
+}
+
+void merge_userinfo_pb(UserInfo_Info_pb& dst, UserInfo_Info_pb const& src)
+{
+    if (!src.displayname().empty())
+    {
+        dst.set_displayname(src.displayname());
+        if (dst.nickname().empty())
+            dst.set_nickname(src.displayname());
+    }
+    if (!src.nickname().empty())
+        dst.set_nickname(src.nickname());
+    if (!src.country().empty())
+        dst.set_country(src.country());
+    if (!src.preferredlanguage().empty())
+        dst.set_preferredlanguage(src.preferredlanguage());
+}
+
+std::string get_connect_steam64(Connect_Infos_pb const& infos)
+{
+    auto it = infos.sessions().find("steam64");
+    return it != infos.sessions().end() ? it->second : std::string();
+}
+
+EOS_UserInfo_ExternalUserInfo* make_external_userinfo(
+    EOS_EExternalAccountType account_type,
+    std::string const& account_id,
+    std::string const& display_name)
+{
+    EOS_UserInfo_ExternalUserInfo* info = new EOS_UserInfo_ExternalUserInfo();
+    info->ApiVersion = EOS_USERINFO_EXTERNALUSERINFO_API_LATEST;
+    info->AccountType = account_type;
+    info->AccountId = dup_cstr(account_id);
+    info->DisplayName = dup_cstr(display_name);
+    info->DisplayNameSanitized = dup_cstr(display_name);
+    return info;
+}
+
+Connect_Infos_pb const* get_connect_infos_for_epic_user(EOS_EpicAccountId userid)
+{
+    if (userid == nullptr || !userid->IsValid())
+        return nullptr;
+
+    auto user = GetEOS_Connect().get_user_by_userid(userid);
+    if (user == GetEOS_Connect().get_end_users())
+        return nullptr;
+
+    return &user->second.infos;
+}
+}
 
 decltype(EOSSDK_UserInfo::userinfo_query_timeout) EOSSDK_UserInfo::userinfo_query_timeout;
 
 EOSSDK_UserInfo::EOSSDK_UserInfo()
 {
-    GetNetwork().register_listener(this, 0, Network_Message_pb::MessagesCase::kUserinfo);
+    try
+    {
+        GetNetwork().register_listener(this, 0, Network_Message_pb::MessagesCase::kUserinfo);
+    }
+    catch (...)
+    {
+        APP_LOG(Log::LogLevel::WARN, "UserInfo network listener registration failed");
+    }
     GetCB_Manager().register_callbacks(this);
     GetCB_Manager().register_frame(this);
 }
@@ -63,6 +140,46 @@ UserInfo_Info_pb* EOSSDK_UserInfo::get_userinfo(EOS_EpicAccountId userid)
         return &it->second;
 
     return nullptr;
+}
+
+void EOSSDK_UserInfo::cache_userinfo_from_connect(EOS_EpicAccountId userid, Connect_Infos_pb const& infos)
+{
+    if (userid == nullptr || !userid->IsValid())
+        return;
+
+    UserInfo_Info_pb& cached = _userinfos[userid];
+    if (!infos.displayname().empty())
+    {
+        cached.set_displayname(infos.displayname());
+        if (cached.nickname().empty())
+            cached.set_nickname(infos.displayname());
+    }
+}
+
+UserInfo_Info_pb* EOSSDK_UserInfo::resolve_userinfo(EOS_EpicAccountId userid)
+{
+    UserInfo_Info_pb* userinfo = get_userinfo(userid);
+    if (userinfo != nullptr && !userinfo->displayname().empty())
+        return userinfo;
+
+    auto user = GetEOS_Connect().get_user_by_userid(userid);
+    if (user != GetEOS_Connect().get_end_users())
+    {
+        cache_userinfo_from_connect(userid, user->second.infos);
+        userinfo = get_userinfo(userid);
+        if (userinfo != nullptr && !userinfo->displayname().empty())
+            return userinfo;
+
+        if (!user->second.infos.displayname().empty())
+        {
+            UserInfo_Info_pb& cached = _userinfos[userid];
+            cached.set_displayname(user->second.infos.displayname());
+            cached.set_nickname(user->second.infos.displayname());
+            return &cached;
+        }
+    }
+
+    return userinfo;
 }
 
 /**
@@ -127,10 +244,21 @@ void EOSSDK_UserInfo::QueryUserInfo(const EOS_UserInfo_QueryUserInfoOptions* Opt
         }
         else if(user->second.connected)
         {
-            _userinfos_queries[Options->TargetUserId].push_back(res);
+            cache_userinfo_from_connect(Options->TargetUserId, user->second.infos);
 
-            UserInfo_Info_Request_pb* request = new UserInfo_Info_Request_pb;
-            send_userinfo_request(user->first->to_string(), request);
+            if (get_userinfo(Options->TargetUserId) != nullptr &&
+                !get_userinfo(Options->TargetUserId)->displayname().empty())
+            {
+                quici.ResultCode = EOS_EResult::EOS_Success;
+                res->done = true;
+            }
+            else
+            {
+                _userinfos_queries[Options->TargetUserId].push_back(res);
+
+                UserInfo_Info_Request_pb* request = new UserInfo_Info_Request_pb;
+                send_userinfo_request(user->first->to_string(), request);
+            }
         }
         else
         {
@@ -272,7 +400,7 @@ EOS_EResult EOSSDK_UserInfo::CopyUserInfo(const EOS_UserInfo_CopyUserInfoOptions
 
     APP_LOG(Log::LogLevel::DEBUG, "Copy infos of %s", Options->TargetUserId->to_string().c_str());
 
-    UserInfo_Info_pb* userinfo = get_userinfo(Options->TargetUserId);
+    UserInfo_Info_pb* userinfo = resolve_userinfo(Options->TargetUserId);
 
     switch (Options->ApiVersion) {
     case EOS_USERINFO_COPYUSERINFO_API_003: {
@@ -285,12 +413,9 @@ EOS_EResult EOSSDK_UserInfo::CopyUserInfo(const EOS_UserInfo_CopyUserInfoOptions
                 return EOS_EResult::EOS_NotFound;
             }
             infos->ApiVersion = Options->ApiVersion;
-            infos->Country = (userinfo->country().empty() ? nullptr : userinfo->country().c_str());
-            infos->PreferredLanguage = (userinfo->preferredlanguage().empty() ? nullptr : userinfo->preferredlanguage().c_str());
-            infos->DisplayName = (userinfo->displayname().empty() ? nullptr : userinfo->displayname().c_str());
-            infos->Nickname = (userinfo->nickname().empty() ? nullptr : userinfo->nickname().c_str());
+            fill_userinfo_strings(reinterpret_cast<EOS_UserInfo002*>(infos), userinfo);
             infos->UserId = Options->TargetUserId;
-            infos->DisplayNameSanitized = infos->DisplayName;
+            infos->DisplayNameSanitized = dup_cstr(userinfo->displayname());
             break;
         }
         case EOS_USERINFO_COPYUSERINFO_API_002:
@@ -305,17 +430,75 @@ EOS_EResult EOSSDK_UserInfo::CopyUserInfo(const EOS_UserInfo_CopyUserInfoOptions
                 return EOS_EResult::EOS_NotFound;
             }
             infos->ApiVersion = Options->ApiVersion;
-            infos->Country = (userinfo->country().empty() ? nullptr : userinfo->country().c_str());
-            infos->PreferredLanguage = (userinfo->preferredlanguage().empty() ? nullptr : userinfo->preferredlanguage().c_str());
-            infos->DisplayName = (userinfo->displayname().empty() ? nullptr : userinfo->displayname().c_str());
-            infos->Nickname = (userinfo->nickname().empty() ? nullptr : userinfo->nickname().c_str());
+            fill_userinfo_strings(reinterpret_cast<EOS_UserInfo002*>(infos), userinfo);
             infos->UserId = Options->TargetUserId;
         }
     }
-   
 
+
+    if (userinfo != nullptr)
+    {
+        APP_LOG(Log::LogLevel::DEBUG, "CopyUserInfo %s displayname='%s'",
+            Options->TargetUserId->to_string().c_str(),
+            userinfo->displayname().c_str());
+    }
 
     return EOS_EResult::EOS_Success;
+}
+
+EOS_EResult EOSSDK_UserInfo::CopyBestDisplayName(const EOS_UserInfo_CopyBestDisplayNameOptions* Options, EOS_UserInfo_BestDisplayName** OutBestDisplayName)
+{
+    if (Options == nullptr)
+    {
+        set_nullptr(OutBestDisplayName);
+        return EOS_EResult::EOS_InvalidParameters;
+    }
+
+    EOS_UserInfo_CopyBestDisplayNameWithPlatformOptions platform_opts{};
+    platform_opts.ApiVersion = EOS_USERINFO_COPYBESTDISPLAYNAMEWITHPLATFORM_API_LATEST;
+    platform_opts.LocalUserId = Options->LocalUserId;
+    platform_opts.TargetUserId = Options->TargetUserId;
+    platform_opts.TargetPlatformType = EOS_OPT_Steam;
+    return CopyBestDisplayNameWithPlatform(&platform_opts, OutBestDisplayName);
+}
+
+EOS_EResult EOSSDK_UserInfo::CopyBestDisplayNameWithPlatform(const EOS_UserInfo_CopyBestDisplayNameWithPlatformOptions* Options, EOS_UserInfo_BestDisplayName** OutBestDisplayName)
+{
+    TRACE_FUNC();
+    GLOBAL_LOCK();
+
+    if (OutBestDisplayName == nullptr || Options == nullptr || Options->TargetUserId == nullptr)
+    {
+        set_nullptr(OutBestDisplayName);
+        return EOS_EResult::EOS_InvalidParameters;
+    }
+
+    UserInfo_Info_pb* userinfo = resolve_userinfo(Options->TargetUserId);
+    if (userinfo == nullptr || userinfo->displayname().empty())
+    {
+        set_nullptr(OutBestDisplayName);
+        return EOS_EResult::EOS_NotFound;
+    }
+
+    EOS_UserInfo_BestDisplayName* best = new EOS_UserInfo_BestDisplayName();
+    best->ApiVersion = EOS_USERINFO_BESTDISPLAYNAME_API_LATEST;
+    best->UserId = Options->TargetUserId;
+    best->DisplayName = dup_cstr(userinfo->displayname());
+    best->DisplayNameSanitized = dup_cstr(userinfo->displayname());
+    best->Nickname = dup_cstr(userinfo->nickname().empty() ? userinfo->displayname() : userinfo->nickname());
+    best->PlatformType = Options->TargetPlatformType != EOS_OPT_Unknown ? Options->TargetPlatformType : EOS_OPT_Steam;
+
+    *OutBestDisplayName = best;
+    APP_LOG(Log::LogLevel::DEBUG, "CopyBestDisplayName for %s -> %s",
+        Options->TargetUserId->to_string().c_str(), userinfo->displayname().c_str());
+    return EOS_EResult::EOS_Success;
+}
+
+EOS_OnlinePlatformType EOSSDK_UserInfo::GetLocalPlatformType(const EOS_UserInfo_GetLocalPlatformTypeOptions* Options)
+{
+    TRACE_FUNC();
+    (void)Options;
+    return EOS_OPT_Steam;
 }
 
 /**
@@ -332,7 +515,17 @@ uint32_t EOSSDK_UserInfo::GetExternalUserInfoCount(const EOS_UserInfo_GetExterna
     TRACE_FUNC();
     GLOBAL_LOCK();
 
-    return 0;
+    if (Options == nullptr || Options->TargetUserId == nullptr)
+        return 0;
+
+    Connect_Infos_pb const* infos = get_connect_infos_for_epic_user(Options->TargetUserId);
+    if (infos == nullptr)
+        return 0;
+
+    uint32_t count = infos->userid().empty() ? 0 : 1;
+    if (!get_connect_steam64(*infos).empty())
+        ++count;
+    return count;
 }
 
 /**
@@ -351,6 +544,37 @@ EOS_EResult EOSSDK_UserInfo::CopyExternalUserInfoByIndex(const EOS_UserInfo_Copy
 {
     TRACE_FUNC();
     GLOBAL_LOCK();
+
+    if (OutExternalUserInfo == nullptr || Options == nullptr || Options->TargetUserId == nullptr)
+    {
+        set_nullptr(OutExternalUserInfo);
+        return EOS_EResult::EOS_InvalidParameters;
+    }
+
+    EOS_UserInfo_CopyExternalUserInfoByAccountTypeOptions type_opts{};
+    type_opts.ApiVersion = EOS_USERINFO_COPYEXTERNALUSERINFOBYACCOUNTTYPE_API_LATEST;
+    type_opts.LocalUserId = Options->LocalUserId;
+    type_opts.TargetUserId = Options->TargetUserId;
+
+    Connect_Infos_pb const* infos = get_connect_infos_for_epic_user(Options->TargetUserId);
+    if (infos == nullptr)
+    {
+        set_nullptr(OutExternalUserInfo);
+        return EOS_EResult::EOS_NotFound;
+    }
+
+    if (Options->Index == 0 && !get_connect_steam64(*infos).empty())
+    {
+        type_opts.AccountType = EOS_EExternalAccountType::EOS_EAT_STEAM;
+        return CopyExternalUserInfoByAccountType(&type_opts, OutExternalUserInfo);
+    }
+
+    if ((Options->Index == 0 && get_connect_steam64(*infos).empty()) ||
+        (Options->Index == 1 && !get_connect_steam64(*infos).empty()))
+    {
+        type_opts.AccountType = EOS_EExternalAccountType::EOS_EAT_EPIC;
+        return CopyExternalUserInfoByAccountType(&type_opts, OutExternalUserInfo);
+    }
 
     set_nullptr(OutExternalUserInfo);
     return EOS_EResult::EOS_NotFound;
@@ -373,6 +597,55 @@ EOS_EResult EOSSDK_UserInfo::CopyExternalUserInfoByAccountType(const EOS_UserInf
     TRACE_FUNC();
     GLOBAL_LOCK();
 
+    if (OutExternalUserInfo == nullptr || Options == nullptr || Options->TargetUserId == nullptr)
+    {
+        set_nullptr(OutExternalUserInfo);
+        return EOS_EResult::EOS_InvalidParameters;
+    }
+
+    Connect_Infos_pb const* infos = get_connect_infos_for_epic_user(Options->TargetUserId);
+    UserInfo_Info_pb* userinfo = resolve_userinfo(Options->TargetUserId);
+    std::string const display_name = userinfo != nullptr && !userinfo->displayname().empty()
+        ? userinfo->displayname()
+        : (infos != nullptr ? infos->displayname() : std::string());
+
+    if (infos == nullptr)
+    {
+        set_nullptr(OutExternalUserInfo);
+        return EOS_EResult::EOS_NotFound;
+    }
+
+    switch (Options->AccountType)
+    {
+        case EOS_EExternalAccountType::EOS_EAT_STEAM:
+        {
+            std::string const steam_id = get_connect_steam64(*infos);
+            if (steam_id.empty())
+            {
+                set_nullptr(OutExternalUserInfo);
+                return EOS_EResult::EOS_NotFound;
+            }
+
+            *OutExternalUserInfo = make_external_userinfo(EOS_EExternalAccountType::EOS_EAT_STEAM, steam_id, display_name);
+            APP_LOG(Log::LogLevel::DEBUG, "CopyExternalUserInfo Steam %s -> %s",
+                Options->TargetUserId->to_string().c_str(), display_name.c_str());
+            return EOS_EResult::EOS_Success;
+        }
+        case EOS_EExternalAccountType::EOS_EAT_EPIC:
+        {
+            if (infos->userid().empty())
+            {
+                set_nullptr(OutExternalUserInfo);
+                return EOS_EResult::EOS_NotFound;
+            }
+
+            *OutExternalUserInfo = make_external_userinfo(EOS_EExternalAccountType::EOS_EAT_EPIC, infos->userid(), display_name);
+            return EOS_EResult::EOS_Success;
+        }
+        default:
+            break;
+    }
+
     set_nullptr(OutExternalUserInfo);
     return EOS_EResult::EOS_NotFound;
 }
@@ -394,8 +667,36 @@ EOS_EResult EOSSDK_UserInfo::CopyExternalUserInfoByAccountId(const EOS_UserInfo_
     TRACE_FUNC();
     GLOBAL_LOCK();
 
-    set_nullptr(OutExternalUserInfo);
-    return EOS_EResult::EOS_NotFound;
+    if (OutExternalUserInfo == nullptr || Options == nullptr || Options->TargetUserId == nullptr || Options->AccountId == nullptr)
+    {
+        set_nullptr(OutExternalUserInfo);
+        return EOS_EResult::EOS_InvalidParameters;
+    }
+
+    Connect_Infos_pb const* infos = get_connect_infos_for_epic_user(Options->TargetUserId);
+    if (infos == nullptr)
+    {
+        set_nullptr(OutExternalUserInfo);
+        return EOS_EResult::EOS_NotFound;
+    }
+
+    std::string const account_id = Options->AccountId;
+    EOS_UserInfo_CopyExternalUserInfoByAccountTypeOptions type_opts{};
+    type_opts.ApiVersion = EOS_USERINFO_COPYEXTERNALUSERINFOBYACCOUNTTYPE_API_LATEST;
+    type_opts.LocalUserId = Options->LocalUserId;
+    type_opts.TargetUserId = Options->TargetUserId;
+
+    if (account_id == get_connect_steam64(*infos))
+        type_opts.AccountType = EOS_EExternalAccountType::EOS_EAT_STEAM;
+    else if (account_id == infos->userid())
+        type_opts.AccountType = EOS_EExternalAccountType::EOS_EAT_EPIC;
+    else
+    {
+        set_nullptr(OutExternalUserInfo);
+        return EOS_EResult::EOS_NotFound;
+    }
+
+    return CopyExternalUserInfoByAccountType(&type_opts, OutExternalUserInfo);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -413,7 +714,7 @@ bool EOSSDK_UserInfo::send_userinfo_request(Network::peer_t const& peerid, UserI
 
     msg.set_source_id(userid);
     msg.set_dest_id(peerid);
-    msg.set_game_id(Settings::Inst().appid);
+    msg.set_game_id(Settings::Inst().network_game_id());
 
     return GetNetwork().TCPSendTo(msg);
 }
@@ -430,10 +731,10 @@ bool EOSSDK_UserInfo::send_my_userinfo(Network::peer_t const& peerid)
 
     msg.set_source_id(userid);
     msg.set_dest_id(peerid);
-    msg.set_game_id(Settings::Inst().appid);
+    msg.set_game_id(Settings::Inst().network_game_id());
 
     auto res = GetNetwork().TCPSendTo(msg);
-    userinfo->release_userinfo_info();
+    (void)userinfo->release_userinfo_info();
 
     return res;
 }
@@ -456,7 +757,7 @@ bool EOSSDK_UserInfo::on_userinfo(Network_Message_pb const& msg, UserInfo_Info_p
     if (user != GetEOS_Connect().get_end_users())
     {
         EOS_EpicAccountId user_id = GetEpicUserId(user->second.infos.userid());
-        _userinfos[user_id] = infos;
+        merge_userinfo_pb(_userinfos[user_id], infos);
         auto it = _userinfos_queries.find(user_id);
         if (it != _userinfos_queries.end())
         {

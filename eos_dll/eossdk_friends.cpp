@@ -19,6 +19,7 @@
 
 #include "eossdk_friends.h"
 #include "eossdk_platform.h"
+#include "eossdk_connect.h"
 #include "eos_client_api.h"
 #include "settings.h"
 
@@ -27,13 +28,98 @@ namespace sdk
 EOSSDK_Friends::EOSSDK_Friends()
 {
     GetCB_Manager().register_callbacks(this);
+    GetCB_Manager().register_frame(this);
 }
 
 EOSSDK_Friends::~EOSSDK_Friends()
 {
+    GetCB_Manager().unregister_frame(this);
     GetCB_Manager().unregister_callbacks(this);
 
     GetCB_Manager().remove_all_notifications(this);
+}
+
+bool EOSSDK_Friends::has_connected_unauthentified_peers() const
+{
+    for (auto user_it = GetEOS_Connect().get_other_users(); user_it != GetEOS_Connect().get_end_users(); ++user_it)
+    {
+        if (user_it->second.connected && !user_it->second.authentified)
+            return true;
+    }
+
+    return false;
+}
+
+void EOSSDK_Friends::rebuild_friends_from_connect()
+{
+    for (auto user_it = GetEOS_Connect().get_other_users(); user_it != GetEOS_Connect().get_end_users(); ++user_it)
+    {
+        if (!user_it->second.connected || !user_it->second.authentified)
+            continue;
+
+        EOS_EpicAccountId account_id = GetEpicUserId(user_it->second.infos.userid());
+        if (account_id->IsValid() && _friends.insert(account_id).second)
+        {
+            APP_LOG(Log::LogLevel::INFO, "Friends cache learned peer friend %s from connect info",
+                account_id->to_string().c_str());
+        }
+    }
+}
+
+void EOSSDK_Friends::notify_friend_update(EOS_EpicAccountId userid, EOS_EFriendsStatus previous, EOS_EFriendsStatus current)
+{
+    if (userid == nullptr || !userid->IsValid())
+        return;
+
+    std::vector<pFrameResult_t> notifs = std::move(GetCB_Manager().get_notifications(this, EOS_Friends_OnFriendsUpdateInfo::k_iCallback));
+    for (auto& notif : notifs)
+    {
+        EOS_Friends_OnFriendsUpdateInfo& ofui = notif->GetCallback<EOS_Friends_OnFriendsUpdateInfo>();
+        ofui.LocalUserId = Settings::Inst().userid;
+        ofui.TargetUserId = userid;
+        ofui.PreviousStatus = previous;
+        ofui.CurrentStatus = current;
+        notif->GetFunc()(notif->GetFuncParam());
+    }
+}
+
+void EOSSDK_Friends::sync_friends_from_connect()
+{
+    size_t const before = _friends.size();
+    rebuild_friends_from_connect();
+
+    if (_friends.size() != before)
+    {
+        APP_LOG(Log::LogLevel::INFO, "Friends cache synced from connect: %u friend(s)",
+            static_cast<unsigned>(_friends.size()));
+
+        for (auto const& friend_id : _friends)
+        {
+            notify_friend_update(friend_id, EOS_EFriendsStatus::EOS_FS_NotFriends, EOS_EFriendsStatus::EOS_FS_Friends);
+        }
+    }
+}
+
+void EOSSDK_Friends::complete_pending_query_friends()
+{
+    if (_pending_query_friends.empty() || has_connected_unauthentified_peers())
+        return;
+
+    rebuild_friends_from_connect();
+
+    for (auto& pending : _pending_query_friends)
+    {
+        if (pending.result == nullptr || pending.result->done)
+            continue;
+
+        APP_LOG(Log::LogLevel::DEBUG, "QueryFriends deferred complete: %u friend(s) from connected peers",
+            static_cast<unsigned>(_friends.size()));
+
+        pending.result->done = true;
+        GetCB_Manager().add_callback(this, pending.result);
+    }
+
+    _pending_query_friends.clear();
 }
 
 /**
@@ -45,6 +131,18 @@ EOSSDK_Friends::~EOSSDK_Friends()
  *
  * @see EOS_Platform_GetFriendsInterface
  */
+
+void EOSSDK_Friends::add_friend(EOS_EpicAccountId userid)
+{
+    if (userid == nullptr || !userid->IsValid())
+        return;
+
+    if (_friends.insert(userid).second)
+    {
+        APP_LOG(Log::LogLevel::INFO, "Friends cache added %s", userid->to_string().c_str());
+        notify_friend_update(userid, EOS_EFriendsStatus::EOS_FS_NotFriends, EOS_EFriendsStatus::EOS_FS_Friends);
+    }
+}
 
 /**
   * Starts an asynchronous task that reads the user's friends list from the backend service, caching it for future use.
@@ -68,15 +166,27 @@ void EOSSDK_Friends::QueryFriends(const EOS_Friends_QueryFriendsOptions* Options
     qfci.LocalUserId = Settings::Inst().userid;
     qfci.ResultCode = EOS_EResult::EOS_Success;
 
-    _friends.clear();
+    rebuild_friends_from_connect();
 
-    for (auto user_it = GetEOS_Connect().get_other_users(); user_it != GetEOS_Connect().get_end_users(); ++user_it)
+    if (_friends.empty() && has_connected_unauthentified_peers())
     {
-        if (user_it->second.authentified)
+        APP_LOG(Log::LogLevel::DEBUG, "QueryFriends: deferring until peer connect info arrives");
+        auto now = std::chrono::steady_clock::now();
+        _pending_query_friends.push_back({res, now, now});
+
+        for (auto user_it = GetEOS_Connect().get_other_users(); user_it != GetEOS_Connect().get_end_users(); ++user_it)
         {
-            _friends.insert(GetEpicUserId(user_it->second.infos.userid()));
+            if (!user_it->second.connected || user_it->second.authentified)
+                continue;
+
+            Connect_Request_Info_pb* req = new Connect_Request_Info_pb;
+            GetEOS_Connect().send_connect_infos_request(user_it->first->to_string(), req);
         }
+
+        return;
     }
+
+    APP_LOG(Log::LogLevel::DEBUG, "QueryFriends: %u friend(s) from connected peers", static_cast<unsigned>(_friends.size()));
 
     res->done = true;
     GetCB_Manager().add_callback(this, res);
@@ -201,6 +311,7 @@ int32_t EOSSDK_Friends::GetFriendsCount(const EOS_Friends_GetFriendsCountOptions
     TRACE_FUNC();
     GLOBAL_LOCK();
 
+    sync_friends_from_connect();
     return static_cast<int32_t>(_friends.size());
 }
 
@@ -220,8 +331,9 @@ EOS_EpicAccountId EOSSDK_Friends::GetFriendAtIndex(const EOS_Friends_GetFriendAt
     TRACE_FUNC();
     GLOBAL_LOCK();
 
+    sync_friends_from_connect();
     if (Options == nullptr || Options->Index >= _friends.size())
-        return nullptr;
+        return GetInvalidEpicUserId();
     
     auto it = _friends.begin();
     std::advance(it, Options->Index);
@@ -246,6 +358,7 @@ EOS_EFriendsStatus EOSSDK_Friends::GetStatus(const EOS_Friends_GetStatusOptions*
     TRACE_FUNC();
     GLOBAL_LOCK();
 
+    sync_friends_from_connect();
     if (Options == nullptr || Options->TargetUserId == nullptr)
         return EOS_EFriendsStatus::EOS_FS_NotFriends;
 
@@ -302,6 +415,45 @@ void EOSSDK_Friends::RemoveNotifyFriendsUpdate(EOS_NotificationId NotificationId
 ///////////////////////////////////////////////////////////////////////////////
 bool EOSSDK_Friends::CBRunFrame()
 {
+    if (_pending_query_friends.empty())
+        return false;
+
+    auto now = std::chrono::steady_clock::now();
+    for (auto it = _pending_query_friends.begin(); it != _pending_query_friends.end();)
+    {
+        if (has_connected_unauthentified_peers() &&
+            now - it->last_poke > std::chrono::seconds(2))
+        {
+            for (auto user_it = GetEOS_Connect().get_other_users(); user_it != GetEOS_Connect().get_end_users(); ++user_it)
+            {
+                if (!user_it->second.connected || user_it->second.authentified)
+                    continue;
+
+                Connect_Request_Info_pb* req = new Connect_Request_Info_pb;
+                GetEOS_Connect().send_connect_infos_request(user_it->first->to_string(), req);
+            }
+            it->last_poke = now;
+        }
+
+        if (now - it->queued > std::chrono::seconds(15))
+        {
+            if (it->result != nullptr && !it->result->done)
+            {
+                rebuild_friends_from_connect();
+                APP_LOG(Log::LogLevel::DEBUG, "QueryFriends timeout complete: %u friend(s)",
+                    static_cast<unsigned>(_friends.size()));
+                it->result->done = true;
+                GetCB_Manager().add_callback(this, it->result);
+            }
+            it = _pending_query_friends.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
+    complete_pending_query_friends();
     return false;
 }
 

@@ -19,6 +19,7 @@
 
 #include "eossdk_platform.h"
 #include "settings.h"
+#include "eos_sdk_version.h"
 
 namespace sdk
 {
@@ -45,8 +46,8 @@ EOSSDK_Platform::EOSSDK_Platform():
     _stats            (nullptr),
     _leaderboards     (nullptr)
 {
-    _cb_manager        = new Callback_Manager;
-    _network           = new Network;
+    _cb_manager = new (std::nothrow) Callback_Manager;
+    _network    = new (std::nothrow) Network;
 }
 
 EOSSDK_Platform::~EOSSDK_Platform()
@@ -64,124 +65,210 @@ EOSSDK_Platform& EOSSDK_Platform::Inst()
 
 void EOSSDK_Platform::Init(const EOS_Platform_Options* Options)
 {
-    GLOBAL_LOCK();
-    if(!_platform_init)
+    try
     {
-        if (Options != nullptr)
+        GLOBAL_LOCK();
+        if(!_platform_init)
         {
-            _api_version = Options->ApiVersion;
-            switch (Options->ApiVersion)
+            if (!_cb_manager || !_network)
             {
-                case EOS_PLATFORM_OPTIONS_API_014: 
-                {
-                    auto pf = reinterpret_cast<const EOS_Platform_Options014*>(Options);
-                    APP_LOG(Log::LogLevel::DEBUG, "IntegratedPlatformOptionsContainerHandle = '%s'", pf->IntegratedPlatformOptionsContainerHandle);
-                    APP_LOG(Log::LogLevel::DEBUG, "OverrideLocaleCode = '%d'", *pf->TaskNetworkTimeoutSeconds);
-                    APP_LOG(Log::LogLevel::DEBUG, "DeploymentId = '%s'", _deployment_id.c_str());
-                }
-                case EOS_PLATFORM_OPTIONS_API_013:
-                case EOS_PLATFORM_OPTIONS_API_012:
-                case EOS_PLATFORM_OPTIONS_API_011:
-                {
-                    auto pf = reinterpret_cast<const EOS_Platform_Options011*>(Options);
-                    if (pf->RTCOptions != NULL) APP_LOG(Log::LogLevel::DEBUG, "RTCOptions = '%s'", pf->RTCOptions->ApiVersion);
-                }
-                case EOS_PLATFORM_OPTIONS_API_010:
-                case EOS_PLATFORM_OPTIONS_API_009:
-                case EOS_PLATFORM_OPTIONS_API_008:
-                case EOS_PLATFORM_OPTIONS_API_007:
-                {
-                    auto pf = reinterpret_cast<const EOS_Platform_Options007*>(Options);
-                    if (pf->CacheDirectory != nullptr)
-                        _ticket_budget_in_milliseconds = pf->TickBudgetInMilliseconds;
-
-                    APP_LOG(Log::LogLevel::DEBUG, "TickBudgetInMilliseconds = '%d'", _ticket_budget_in_milliseconds);
-                }                
-                case EOS_PLATFORM_OPTIONS_API_006:
-                {
-                    auto pf = reinterpret_cast<const EOS_Platform_Options006*>(Options);
-                    if (pf->CacheDirectory != nullptr)
-                        _cache_directory = pf->CacheDirectory;
-
-                    APP_LOG(Log::LogLevel::DEBUG, "CacheDirectory = '%s'", _cache_directory.c_str());
-                }
-                case EOS_PLATFORM_OPTIONS_API_005:
-                {
-                    auto pf = reinterpret_cast<const EOS_Platform_Options005*>(Options);
-                    if (pf->EncryptionKey != nullptr)
-                        _encryption_key = pf->EncryptionKey;
-
-                    if (pf->OverrideCountryCode != nullptr)
-                        _override_country_code = pf->OverrideCountryCode;
-
-                    if (pf->OverrideLocaleCode != nullptr)
-                        _override_locale_code = pf->OverrideLocaleCode;
-
-                    if (pf->DeploymentId != nullptr)
-                        _deployment_id = pf->DeploymentId;
-
-                    _flags = pf->Flags;
-
-                    APP_LOG(Log::LogLevel::DEBUG, "EncryptionKey = '%s'", _encryption_key.c_str());
-                    APP_LOG(Log::LogLevel::DEBUG, "OverrideCountryCode = '%s'", _override_country_code.c_str());
-                    APP_LOG(Log::LogLevel::DEBUG, "OverrideLocaleCode = '%s'", _override_locale_code.c_str());
-                    APP_LOG(Log::LogLevel::DEBUG, "DeploymentId = '%s'", _deployment_id.c_str());
-                    APP_LOG(Log::LogLevel::DEBUG, "Flags = %llu", _flags);
-                }
-                case EOS_PLATFORM_OPTIONS_API_001:
-                {
-                    auto pf = reinterpret_cast<const EOS_Platform_Options001*>(Options);
-                    _reserved = pf->Reserved;
-
-                    if (pf->ProductId != nullptr)
-                        _product_id = pf->ProductId;
-
-                    if (pf->SandboxId != nullptr)
-                        _sandbox_id = pf->SandboxId;
-
-                    if (pf->ClientCredentials.ClientId != nullptr)
-                        _client_id = pf->ClientCredentials.ClientId;
-
-                    if (pf->ClientCredentials.ClientSecret != nullptr)
-                        _client_secret = pf->ClientCredentials.ClientSecret;
-
-                    _is_server = pf->bIsServer;
-
-                    APP_LOG(Log::LogLevel::DEBUG, "ProductId = '%s'", _product_id.c_str());
-                    APP_LOG(Log::LogLevel::DEBUG, "SandboxId = '%s'", _sandbox_id.c_str());
-                    APP_LOG(Log::LogLevel::DEBUG, "ClientId = '%s'", _client_id.c_str());
-                    APP_LOG(Log::LogLevel::DEBUG, "ClientSecret = '%s'", _client_secret.c_str());
-                    APP_LOG(Log::LogLevel::DEBUG, "ApiVersion = %u", pf->ApiVersion);
-                }
-                break;
-
-                default:
-                    APP_LOG(Log::LogLevel::FATAL, "Unmanaged API version %d", Options->ApiVersion);
-                    abort();
+                APP_LOG(Log::LogLevel::FATAL, "Core platform services are unavailable");
+                return;
             }
+
+            if (Options != nullptr)
+            {
+                _api_version = Options->ApiVersion;
+                sdk::EosSdkVersion::on_platform_options_api(Options->ApiVersion);
+                switch (Options->ApiVersion)
+                {
+                    platform_options_latest:
+                    case EOS_PLATFORM_OPTIONS_API_015:
+                    case EOS_PLATFORM_OPTIONS_API_014: 
+                    {
+                        auto pf = reinterpret_cast<const EOS_Platform_Options014*>(Options);
+                        APP_LOG(Log::LogLevel::DEBUG, "IntegratedPlatformOptionsContainerHandle = %p", pf->IntegratedPlatformOptionsContainerHandle);
+                        if (pf->TaskNetworkTimeoutSeconds != nullptr)
+                            APP_LOG(Log::LogLevel::DEBUG, "TaskNetworkTimeoutSeconds = %f", *pf->TaskNetworkTimeoutSeconds);
+                    }
+                    case EOS_PLATFORM_OPTIONS_API_013:
+                    case EOS_PLATFORM_OPTIONS_API_012:
+                    case EOS_PLATFORM_OPTIONS_API_011:
+                    {
+                        auto pf = reinterpret_cast<const EOS_Platform_Options011*>(Options);
+                        if (pf->RTCOptions != NULL) APP_LOG(Log::LogLevel::DEBUG, "RTCOptions ApiVersion = %d", pf->RTCOptions->ApiVersion);
+                    }
+                    case EOS_PLATFORM_OPTIONS_API_010:
+                    case EOS_PLATFORM_OPTIONS_API_009:
+                    case EOS_PLATFORM_OPTIONS_API_008:
+                    case EOS_PLATFORM_OPTIONS_API_007:
+                    {
+                        auto pf = reinterpret_cast<const EOS_Platform_Options007*>(Options);
+                        if (pf->CacheDirectory != nullptr)
+                            _ticket_budget_in_milliseconds = pf->TickBudgetInMilliseconds;
+
+                        APP_LOG(Log::LogLevel::DEBUG, "TickBudgetInMilliseconds = '%d'", _ticket_budget_in_milliseconds);
+                    }                
+                    case EOS_PLATFORM_OPTIONS_API_006:
+                    {
+                        auto pf = reinterpret_cast<const EOS_Platform_Options006*>(Options);
+                        if (pf->CacheDirectory != nullptr)
+                            _cache_directory = pf->CacheDirectory;
+
+                        APP_LOG(Log::LogLevel::DEBUG, "CacheDirectory = '%s'", _cache_directory.c_str());
+                    }
+                    case EOS_PLATFORM_OPTIONS_API_005:
+                    {
+                        auto pf = reinterpret_cast<const EOS_Platform_Options005*>(Options);
+                        if (pf->EncryptionKey != nullptr)
+                            _encryption_key = pf->EncryptionKey;
+
+                        if (pf->OverrideCountryCode != nullptr)
+                            _override_country_code = pf->OverrideCountryCode;
+
+                        if (pf->OverrideLocaleCode != nullptr)
+                            _override_locale_code = pf->OverrideLocaleCode;
+
+                        if (pf->DeploymentId != nullptr)
+                            _deployment_id = pf->DeploymentId;
+
+                        _flags = pf->Flags;
+
+                        APP_LOG(Log::LogLevel::DEBUG, "EncryptionKey = '%s'", _encryption_key.c_str());
+                        APP_LOG(Log::LogLevel::DEBUG, "OverrideCountryCode = '%s'", _override_country_code.c_str());
+                        APP_LOG(Log::LogLevel::DEBUG, "OverrideLocaleCode = '%s'", _override_locale_code.c_str());
+                        APP_LOG(Log::LogLevel::DEBUG, "DeploymentId = '%s'", _deployment_id.c_str());
+                        APP_LOG(Log::LogLevel::DEBUG, "Flags = %llu", _flags);
+                    }
+                    case EOS_PLATFORM_OPTIONS_API_001:
+                    {
+                        auto pf = reinterpret_cast<const EOS_Platform_Options001*>(Options);
+                        _reserved = pf->Reserved;
+
+                        if (pf->ProductId != nullptr)
+                            _product_id = pf->ProductId;
+
+                        if (pf->SandboxId != nullptr)
+                            _sandbox_id = pf->SandboxId;
+
+                        if (pf->ClientCredentials.ClientId != nullptr)
+                            _client_id = pf->ClientCredentials.ClientId;
+
+                        if (pf->ClientCredentials.ClientSecret != nullptr)
+                            _client_secret = pf->ClientCredentials.ClientSecret;
+
+                        _is_server = pf->bIsServer;
+
+                        APP_LOG(Log::LogLevel::DEBUG, "ProductId = '%s'", _product_id.c_str());
+                        APP_LOG(Log::LogLevel::DEBUG, "SandboxId = '%s'", _sandbox_id.c_str());
+                        APP_LOG(Log::LogLevel::DEBUG, "ClientId = '%s'", _client_id.c_str());
+                        APP_LOG(Log::LogLevel::DEBUG, "ClientSecret = '%s'", _client_secret.c_str());
+                        APP_LOG(Log::LogLevel::DEBUG, "ApiVersion = %u", pf->ApiVersion);
+                    }
+                    break;
+
+                    default:
+                        APP_LOG(Log::LogLevel::WARN, "Unknown EOS_Platform_Options API version %d, treating as %d", Options->ApiVersion, EOS_PLATFORM_OPTIONS_API_015);
+                        goto platform_options_latest;
+                }
+            }
+
+            try
+            {
+                Settings::Inst().apply_runtime_product_id(_product_id);
+            }
+            catch (...)
+            {
+                APP_LOG(Log::LogLevel::WARN, "apply_runtime_product_id failed, continuing platform init");
+            }
+
+            _auth              = new (std::nothrow) EOSSDK_Auth;
+            _friends           = new (std::nothrow) EOSSDK_Friends;
+            _presence          = new (std::nothrow) EOSSDK_Presence;
+            _connect           = new (std::nothrow) EOSSDK_Connect;
+            _metrics           = new (std::nothrow) EOSSDK_Metrics;
+            _ecom              = new (std::nothrow) EOSSDK_Ecom;
+            _ui                = new (std::nothrow) EOSSDK_UI;
+            _sessions          = new (std::nothrow) EOSSDK_Sessions;
+            _lobby             = new (std::nothrow) EOSSDK_Lobby;
+            _userinfo          = new (std::nothrow) EOSSDK_UserInfo;
+            _p2p               = new (std::nothrow) EOSSDK_P2P;
+            _playerdatastorage = new (std::nothrow) EOSSDK_PlayerDataStorage;
+            _achievements      = new (std::nothrow) EOSSDK_Achievements;
+            _stats             = new (std::nothrow) EOSSDK_Stats;
+            _titlestorage      = new (std::nothrow) EOSSDK_TitleStorage;
+            _leaderboards      = new (std::nothrow) EOSSDK_Leaderboards;
+
+            if (!_auth || !_friends || !_presence || !_connect || !_metrics || !_ecom || !_ui ||
+                !_sessions || !_lobby || !_userinfo || !_p2p || !_playerdatastorage ||
+                !_achievements || !_stats || !_titlestorage || !_leaderboards)
+            {
+                APP_LOG(Log::LogLevel::FATAL, "Failed to allocate EOS platform interfaces");
+                Release();
+                return;
+            }
+
+            if (_presence)
+            {
+                try
+                {
+                    _presence->setup_myself();
+                }
+                catch (...)
+                {
+                    APP_LOG(Log::LogLevel::WARN, "presence setup_myself failed");
+                }
+            }
+            if (_userinfo)
+            {
+                try
+                {
+                    _userinfo->setup_myself();
+                }
+                catch (...)
+                {
+                    APP_LOG(Log::LogLevel::WARN, "userinfo setup_myself failed");
+                }
+            }
+
+            _platform_init = true;
         }
+    }
+    catch (...)
+    {
+#if defined(__WINDOWS__)
+        OutputDebugStringA("NemirtingasEpicEmu: EOSSDK_Platform::Init failed\n");
+#endif
+        APP_LOG(Log::LogLevel::WARN, "EOSSDK_Platform::Init failed with an exception");
 
-        _auth              = new EOSSDK_Auth;
-        _friends           = new EOSSDK_Friends;
-        _presence          = new EOSSDK_Presence;
-        _connect           = new EOSSDK_Connect;
-        _metrics           = new EOSSDK_Metrics;
-        _ecom              = new EOSSDK_Ecom;
-        _ui                = new EOSSDK_UI;
-        _sessions          = new EOSSDK_Sessions;
-        _lobby             = new EOSSDK_Lobby;
-        _userinfo          = new EOSSDK_UserInfo;
-        _p2p               = new EOSSDK_P2P;
-        _playerdatastorage = new EOSSDK_PlayerDataStorage;
-        _achievements      = new EOSSDK_Achievements;
-        _stats             = new EOSSDK_Stats;
-        _titlestorage      = new EOSSDK_TitleStorage;
-        _leaderboards      = new EOSSDK_Leaderboards;
-
-        _presence->setup_myself();
-        _userinfo->setup_myself();
-
-        _platform_init = true;
+        if (_auth && _connect && !_platform_init)
+        {
+            if (_presence)
+            {
+                try
+                {
+                    _presence->setup_myself();
+                }
+                catch (...)
+                {
+                }
+            }
+            if (_userinfo)
+            {
+                try
+                {
+                    _userinfo->setup_myself();
+                }
+                catch (...)
+                {
+                }
+            }
+            _platform_init = true;
+        }
+        else
+        {
+            Release();
+        }
     }
 }
 
@@ -189,27 +276,24 @@ void EOSSDK_Platform::Release()
 {
     GLOBAL_LOCK();
 
-    if (_platform_init)
-    {
-        delete _leaderboards;
-        delete _titlestorage;
-        delete _stats;
-        delete _achievements;
-        delete _playerdatastorage;
-        delete _p2p;
-        delete _userinfo;
-        delete _lobby;
-        delete _sessions;
-        delete _presence;
-        delete _friends;
-        delete _ui;
-        delete _ecom;
-        delete _connect;
-        delete _auth;
-        delete _metrics;
+    _platform_init = false;
 
-        _platform_init = false;
-    }
+    delete _leaderboards;      _leaderboards = nullptr;
+    delete _titlestorage;      _titlestorage = nullptr;
+    delete _stats;             _stats = nullptr;
+    delete _achievements;      _achievements = nullptr;
+    delete _playerdatastorage; _playerdatastorage = nullptr;
+    delete _p2p;               _p2p = nullptr;
+    delete _userinfo;          _userinfo = nullptr;
+    delete _lobby;             _lobby = nullptr;
+    delete _sessions;         _sessions = nullptr;
+    delete _presence;          _presence = nullptr;
+    delete _friends;           _friends = nullptr;
+    delete _ui;                _ui = nullptr;
+    delete _ecom;              _ecom = nullptr;
+    delete _connect;           _connect = nullptr;
+    delete _auth;              _auth = nullptr;
+    delete _metrics;           _metrics = nullptr;
 }
 
 /**
@@ -219,6 +303,9 @@ void EOSSDK_Platform::Release()
 void EOSSDK_Platform::Tick()
 {
     GLOBAL_LOCK();
+    if (!_platform_init)
+        return;
+
     GetCB_Manager().set_max_tick_budget(_ticket_budget_in_milliseconds);
     GetCB_Manager().tick();
 }
@@ -528,7 +615,7 @@ EOS_EResult EOSSDK_Platform::GetOverrideCountryCode(char* OutBuffer, int32_t* In
 
     if (*InOutBufferLength < (_override_country_code.length() + 1))
     {
-        *InOutBufferLength = _override_country_code.length() + 1;
+        *InOutBufferLength = static_cast<int32_t>(_override_country_code.length() + 1);
         return EOS_EResult::EOS_LimitExceeded;
     }
 
@@ -563,7 +650,7 @@ EOS_EResult EOSSDK_Platform::GetOverrideLocaleCode(char* OutBuffer, int32_t* InO
 
     if (*InOutBufferLength < (_override_locale_code.length() + 1))
     {
-        *InOutBufferLength = _override_locale_code.length() + 1;
+        *InOutBufferLength = static_cast<int32_t>(_override_locale_code.length() + 1);
         return EOS_EResult::EOS_LimitExceeded;
     }
 

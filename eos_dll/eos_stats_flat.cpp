@@ -18,6 +18,7 @@
  */
 
 #include "eossdk_stats.h"
+#include "eos_api_trace.h"
 
 using namespace sdk;
 
@@ -35,6 +36,7 @@ using namespace sdk;
  */
 EOS_DECLARE_FUNC(void) EOS_Stats_IngestStat(EOS_HStats Handle, const EOS_Stats_IngestStatOptions* Options, void* ClientData, const EOS_Stats_OnIngestStatCompleteCallback CompletionDelegate)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return;
 
@@ -54,6 +56,7 @@ EOS_DECLARE_FUNC(void) EOS_Stats_IngestStat(EOS_HStats Handle, const EOS_Stats_I
  */
 EOS_DECLARE_FUNC(void) EOS_Stats_QueryStats(EOS_HStats Handle, const EOS_Stats_QueryStatsOptions* Options, void* ClientData, const EOS_Stats_OnQueryStatsCompleteCallback CompletionDelegate)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return;
 
@@ -72,6 +75,7 @@ EOS_DECLARE_FUNC(void) EOS_Stats_QueryStats(EOS_HStats Handle, const EOS_Stats_Q
  */
 EOS_DECLARE_FUNC(uint32_t) EOS_Stats_GetStatsCount(EOS_HStats Handle, const EOS_Stats_GetStatCountOptions* Options)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return 0;
 
@@ -93,6 +97,7 @@ EOS_DECLARE_FUNC(uint32_t) EOS_Stats_GetStatsCount(EOS_HStats Handle, const EOS_
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Stats_CopyStatByIndex(EOS_HStats Handle, const EOS_Stats_CopyStatByIndexOptions* Options, EOS_Stats_Stat** OutStat)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -114,6 +119,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Stats_CopyStatByIndex(EOS_HStats Handle, const
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Stats_CopyStatByName(EOS_HStats Handle, const EOS_Stats_CopyStatByNameOptions* Options, EOS_Stats_Stat** OutStat)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -132,6 +138,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Stats_CopyStatByName(EOS_HStats Handle, const 
  */
 EOS_DECLARE_FUNC(void) EOS_Stats_Stat_Release(EOS_Stats_Stat* Stat)
 {
+    EOS_API_TRACE();
     TRACE_FUNC();
     if (Stat == nullptr)
         return;

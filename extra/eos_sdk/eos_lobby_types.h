@@ -9,7 +9,7 @@ enum { k_iLobbyCallbackBase = 7000 };
 
 #define EOS_LobbyDetails_Info                               EOS_LobbyDetails_Info003
 #define EOS_Lobby_LocalRTCOptions                           EOS_Lobby_LocalRTCOptions001
-#define EOS_Lobby_CreateLobbyOptions                        EOS_Lobby_CreateLobbyOptions009
+#define EOS_Lobby_CreateLobbyOptions                        EOS_Lobby_CreateLobbyOptions010
 #define EOS_Lobby_DestroyLobbyOptions                       EOS_Lobby_DestroyLobbyOptions001
 #define EOS_Lobby_JoinLobbyOptions                          EOS_Lobby_JoinLobbyOptions003
 #define EOS_Lobby_LeaveLobbyOptions                         EOS_Lobby_LeaveLobbyOptions001
@@ -67,6 +67,7 @@ enum { k_iLobbyCallbackBase = 7000 };
 #define EOS_LOBBY_CREATELOBBY_API_008 8
 
 #include "eos_lobby_types1.16.4.h"
+#include "eos_lobby_types1.19.0.h"
 #include "eos_lobby_types1.14.2.h"
 #include "eos_lobby_types1.12.0.h"
 #include "eos_lobby_types1.11.0.h"
@@ -76,7 +77,7 @@ enum { k_iLobbyCallbackBase = 7000 };
 
 #define EOS_LOBBYDETAILS_INFO_API_LATEST                        EOS_LOBBYDETAILS_INFO_API_003
 #define EOS_LOBBY_LOCALRTCOPTIONS_API_LATEST                    EOS_LOBBY_LOCALRTCOPTIONS_API_001
-#define EOS_LOBBY_CREATELOBBY_API_LATEST                        EOS_LOBBY_CREATELOBBY_API_009
+#define EOS_LOBBY_CREATELOBBY_API_LATEST                        EOS_LOBBY_CREATELOBBY_API_010
 #define EOS_LOBBY_DESTROYLOBBY_API_LATEST                       EOS_LOBBY_DESTROYLOBBY_API_001
 #define EOS_LOBBY_JOINLOBBY_API_LATEST                          EOS_LOBBY_JOINLOBBY_API_003
 #define EOS_LOBBY_LEAVELOBBY_API_LATEST                         EOS_LOBBY_LEAVELOBBY_API_001

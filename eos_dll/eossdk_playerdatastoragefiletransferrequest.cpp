@@ -46,7 +46,7 @@ void EOSSDK_PlayerDataStorageFileTransferRequest::set_read_transfert(const EOS_P
     _progress_callback = ReadOptions->FileTransferProgressCallback;
     _chunk_size = ReadOptions->ReadChunkLengthBytes;
     _file_name = ReadOptions->Filename;
-    _file_size = FileManager::file_size(file_path);
+    _file_size = static_cast<uint32_t>(FileManager::file_size(file_path));
 
     _file_buffer.resize(_chunk_size);
     _input_file = std::move(FileManager::open_read(file_path, std::ios::binary));
@@ -109,7 +109,7 @@ EOS_EResult EOSSDK_PlayerDataStorageFileTransferRequest::GetFilename(uint32_t Fi
     if (OutStringLength == nullptr || OutStringBuffer == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
-    *OutStringLength = _file_name.length();
+    *OutStringLength = static_cast<int32_t>(_file_name.length());
     size_t copy_len = std::min<size_t>(FilenameStringBufferSizeBytes, _file_name.length());
     _file_name.copy(OutStringBuffer, copy_len);
     OutStringBuffer[copy_len - 1] = '\0';

@@ -29,7 +29,8 @@ decltype(EOSSDK_SessionSearch::search_timeout) EOSSDK_SessionSearch::search_time
 decltype(EOSSDK_SessionSearch::search_id)      EOSSDK_SessionSearch::search_id(0);
 
 EOSSDK_SessionSearch::EOSSDK_SessionSearch():
-    _released(false)
+    _released(false),
+    _search_broadcast_sent(false)
 {
     GetCB_Manager().register_callbacks(this);
 
@@ -75,6 +76,7 @@ EOS_EResult EOSSDK_SessionSearch::SetSessionId(const EOS_SessionSearch_SetSessio
         return EOS_EResult::EOS_InvalidParameters;
     
     _search_infos.set_session_id(Options->SessionId);
+    APP_LOG(Log::LogLevel::DEBUG, "SessionSearch_SetSessionId: %s", Options->SessionId);
 
     return EOS_EResult::EOS_Success;
 }
@@ -228,11 +230,48 @@ void EOSSDK_SessionSearch::Find(const EOS_SessionSearch_FindOptions* Options, vo
     else
     {
         _search_cb = res;
+        _search_broadcast_sent = false;
+        _results.clear();
         _search_infos.set_search_id(search_id++);
+        search_local();
         send_sessions_search(&_search_infos);
     }
 
     GetCB_Manager().add_callback(this, res);
+}
+
+void EOSSDK_SessionSearch::search_local()
+{
+    Sessions_Search_response_pb resp;
+    {
+        GLOBAL_LOCK();
+        GetEOS_Sessions().fill_sessions_search_response(&resp, _search_infos, false);
+    }
+
+    for (auto const& session : resp.sessions())
+    {
+        if (_results.size() >= _search_infos.max_results())
+            break;
+
+        bool already_added = false;
+        for (auto const& existing : _results)
+        {
+            if (existing.session_id() == session.session_id())
+            {
+                already_added = true;
+                break;
+            }
+        }
+        if (!already_added)
+            _results.emplace_back(session);
+    }
+
+    if (!resp.sessions().empty())
+    {
+        APP_LOG(Log::LogLevel::INFO, "Session search local: matched %u sessions for id=%s",
+            static_cast<unsigned>(resp.sessions_size()),
+            _search_infos.session_id().c_str());
+    }
 }
 
 /**
@@ -250,7 +289,23 @@ uint32_t EOSSDK_SessionSearch::GetSearchResultCount(const EOS_SessionSearch_GetS
     if (Options == nullptr || _search_cb.get() != nullptr)
         return 0;
 
-    return static_cast<uint32_t>(_results.size());
+    uint32_t const count = static_cast<uint32_t>(_results.size());
+    if (count == 0)
+    {
+        APP_LOG(Log::LogLevel::INFO, "Session search result count: 0 (search_id=%llu session_id=%s)",
+            static_cast<unsigned long long>(_search_infos.search_id()),
+            _search_infos.session_id().c_str());
+    }
+    else
+    {
+        APP_LOG(Log::LogLevel::INFO, "Session search result count: %u (search_id=%llu session_id=%s first=%s host=%s)",
+            count,
+            static_cast<unsigned long long>(_search_infos.search_id()),
+            _search_infos.session_id().c_str(),
+            _results.front().session_id().c_str(),
+            _results.front().host_address().c_str());
+    }
+    return count;
 }
 
 /**
@@ -283,6 +338,7 @@ EOS_EResult EOSSDK_SessionSearch::CopySearchResultByIndex(const EOS_SessionSearc
     auto it = _results.begin();
     std::advance(it, Options->SessionIndex);
     details->_infos = *it;
+    GetEOS_Sessions().prepare_session_infos_for_network(details->_infos);
 
     *OutSessionHandle = reinterpret_cast<EOS_HSessionDetails>(details);
     return EOS_EResult::EOS_Success;
@@ -315,7 +371,7 @@ bool EOSSDK_SessionSearch::send_sessions_search(Sessions_Search_pb* search)
     Sessions_Search_Message_pb* search_msg = new Sessions_Search_Message_pb();
 
     msg.set_source_id(user_id);
-    msg.set_game_id(Settings::Inst().appid);
+    msg.set_game_id(Settings::Inst().network_game_id());
 
     search_msg->set_allocated_search(search);
     msg.set_allocated_sessions_search(search_msg);
@@ -323,6 +379,13 @@ bool EOSSDK_SessionSearch::send_sessions_search(Sessions_Search_pb* search)
     if (_search_infos.target_id().empty())
     {
         _search_peers = std::move(GetNetwork().TCPSendToAllPeers(msg));
+
+        msg.clear_dest_id();
+        if (GetNetwork().SendBroadcast(msg))
+            _search_broadcast_sent = true;
+
+        APP_LOG(Log::LogLevel::INFO, "Session search sent (tcp peers: %u, broadcast: %d, session_id: %s)",
+            static_cast<unsigned>(_search_peers.size()), _search_broadcast_sent ? 1 : 0, _search_infos.session_id().c_str());
     }
     else
     {
@@ -333,7 +396,7 @@ bool EOSSDK_SessionSearch::send_sessions_search(Sessions_Search_pb* search)
         }
     }
 
-    search_msg->release_search(); // Don't delete our search infos
+    (void)search_msg->release_search(); // Don't delete our search infos
 
     return true;
 }
@@ -354,11 +417,61 @@ bool EOSSDK_SessionSearch::on_sessions_search_response(Network_Message_pb const&
 
         for (auto const& session : resp.sessions())
         {
-            _results.emplace_back(session);
+            if (_results.size() >= _search_infos.max_results())
+                break;
+
+            bool already_added = false;
+            for (auto const& existing : _results)
+            {
+                if (existing.session_id() == session.session_id())
+                {
+                    already_added = true;
+                    break;
+                }
+            }
+            if (!already_added)
+            {
+                Session_Infos_pb session_copy = session;
+                if (!_search_infos.session_id().empty() &&
+                    session_copy.session_id() != _search_infos.session_id())
+                {
+                    session_copy.set_session_id(_search_infos.session_id());
+                }
+
+                std::string expected_host = msg.source_id();
+                if (!_search_infos.target_id().empty())
+                    expected_host = _search_infos.target_id();
+
+                std::string const owner = session_copy.registered_players_size() > 0
+                    ? session_copy.registered_players(0)
+                    : std::string{};
+                if (!owner.empty() && !expected_host.empty() && owner != expected_host)
+                {
+                    APP_LOG(Log::LogLevel::WARN,
+                        "Session search rejected: session=%s owner=%s expected_host=%s responder=%s search_id=%llu",
+                        session_copy.session_id().c_str(),
+                        owner.c_str(),
+                        expected_host.c_str(),
+                        msg.source_id().c_str(),
+                        static_cast<unsigned long long>(resp.search_id()));
+                    continue;
+                }
+
+                GetEOS_Sessions().fix_session_host_from_peer(session_copy, expected_host.empty() ? msg.source_id() : expected_host);
+                GetEOS_Sessions().prepare_session_infos_for_network(session_copy);
+                GetEOS_Sessions().register_discovered_session(session_copy);
+                _results.emplace_back(std::move(session_copy));
+            }
             
             if(_results.size() >= _search_infos.max_results())
                 break;
         }
+
+        APP_LOG(Log::LogLevel::INFO, "Session search response from %s: total results=%u pending peers=%u search_id=%llu",
+            msg.source_id().c_str(),
+            static_cast<unsigned>(_results.size()),
+            static_cast<unsigned>(_search_peers.size()),
+            static_cast<unsigned long long>(resp.search_id()));
     }
 
     return true;
@@ -395,12 +508,50 @@ bool EOSSDK_SessionSearch::RunCallbacks(pFrameResult_t res)
         case EOS_SessionSearch_FindCallbackInfo::k_iCallback:
         {
             EOS_SessionSearch_FindCallbackInfo& fci = res->GetCallback<EOS_SessionSearch_FindCallbackInfo>();
-            if (_search_peers.empty() ||
-                (std::chrono::steady_clock::now() - _search_cb->created_time) > search_timeout)
-            {// All peers answered or Search timeout
-                fci.ResultCode = EOS_EResult::EOS_Success;
+            const auto elapsed = std::chrono::steady_clock::now() - _search_cb->created_time;
+            const bool timed_out = elapsed > search_timeout;
+
+            if (!timed_out)
+            {
+                if (!_search_infos.session_id().empty() && !_results.empty())
+                {
+                    fci.ResultCode = EOS_EResult::EOS_Success;
+                    _search_cb.reset();
+                    _search_broadcast_sent = false;
+                    res->done = true;
+                    break;
+                }
+
+                if (!_search_infos.target_id().empty() && !_results.empty())
+                {
+                    fci.ResultCode = EOS_EResult::EOS_Success;
+                    _search_cb.reset();
+                    _search_broadcast_sent = false;
+                    res->done = true;
+                    break;
+                }
+
+                if (!_search_peers.empty())
+                    break;
+
+                if (_search_broadcast_sent && _results.empty())
+                    break;
+            }
+
+            if (_search_peers.empty() || timed_out)
+            {
+                if (_results.empty() &&
+                    (!_search_infos.session_id().empty() || !_search_infos.target_id().empty()))
+                {
+                    fci.ResultCode = EOS_EResult::EOS_NotFound;
+                }
+                else
+                {
+                    fci.ResultCode = EOS_EResult::EOS_Success;
+                }
 
                 _search_cb.reset();
+                _search_broadcast_sent = false;
                 res->done = true;
             }
         }

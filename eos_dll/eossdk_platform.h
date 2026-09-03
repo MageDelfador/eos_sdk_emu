@@ -88,6 +88,7 @@ namespace sdk
         ~EOSSDK_Platform();
 
         static EOSSDK_Platform& Inst();
+        bool is_platform_ready() const { return _platform_init; }
         void Init(const EOS_Platform_Options* options);
 
         void Release();

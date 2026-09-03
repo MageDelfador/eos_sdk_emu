@@ -57,6 +57,9 @@ namespace sdk
         ~EOSSDK_Presence();
 
         void setup_myself();
+        void ensure_default_peer_presence(EOS_EpicAccountId userid);
+    void set_local_join_info(std::string const& join_info);
+    void clear_local_join_info();
         inline Presence_Info_pb& get_myself();
         Presence_Info_pb* get_presence(EOS_EpicAccountId userid);
         void trigger_presence_change(EOS_EpicAccountId userid);

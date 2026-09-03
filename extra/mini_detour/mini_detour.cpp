@@ -638,7 +638,7 @@ int find_space_for_trampoline(uint8_t** func, int bytes_needed, bool ignore_jump
         }
     }
 
-    return pCode - *func;
+    return static_cast<int>(pCode - *func);
 }
 
 ///////////////////////////////////////////

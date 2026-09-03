@@ -31,7 +31,6 @@ using global_lock_t = std::lock_guard<std::recursive_mutex>;
 LOCAL_API std::recursive_mutex& global_mutex();
 #define GLOBAL_LOCK() global_lock_t __global_lock(global_mutex())
 
-LOCAL_API std::random_device& get_rd();
 LOCAL_API std::mt19937_64& get_gen();
 
 LOCAL_API void random_string(std::string const& charset, char* buff, size_t length);
@@ -39,6 +38,8 @@ LOCAL_API std::string generate_account_id();
 LOCAL_API std::string generate_account_id_from_name(std::string const& username);
 LOCAL_API std::string generate_epic_id_user();
 LOCAL_API std::string generate_epic_id_user_from_name(std::string const& username);
+LOCAL_API std::string generate_epic_id_from_steam64(std::string const& steam64);
+LOCAL_API std::string generate_productuserid_from_epicid(std::string const& epicid);
 
 LOCAL_API void fatal_throw(const char* msg);
 

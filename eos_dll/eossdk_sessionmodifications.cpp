@@ -21,6 +21,7 @@
 #include "eossdk_platform.h"
 #include "eos_client_api.h"
 #include "settings.h"
+#include "os_funcs.h"
 
 namespace sdk
 {
@@ -70,7 +71,7 @@ EOS_EResult EOSSDK_SessionModification::SetHostAddress(const EOS_SessionModifica
     if (Options == nullptr || Options->HostAddress == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
-    _infos.set_host_address(Options->HostAddress);
+    _infos.set_host_address(normalize_session_host_address(Options->HostAddress));
 
     return EOS_EResult::EOS_Success;
 }

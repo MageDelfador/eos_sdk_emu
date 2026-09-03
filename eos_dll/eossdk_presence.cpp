@@ -31,7 +31,14 @@ EOSSDK_Presence::EOSSDK_Presence()
 {
     GetCB_Manager().register_callbacks(this);
 
-    GetNetwork().register_listener(this, 0, Network_Message_pb::MessagesCase::kPresence);
+    try
+    {
+        GetNetwork().register_listener(this, 0, Network_Message_pb::MessagesCase::kPresence);
+    }
+    catch (...)
+    {
+        APP_LOG(Log::LogLevel::WARN, "Presence network listener registration failed");
+    }
 }
 
 EOSSDK_Presence::~EOSSDK_Presence()
@@ -59,6 +66,51 @@ void EOSSDK_Presence::setup_myself()
 #elif defined(__APPLE__)
     presence.set_platform("APPLE"); // TODO
 #endif
+}
+
+void EOSSDK_Presence::ensure_default_peer_presence(EOS_EpicAccountId userid)
+{
+    if (userid == nullptr || !userid->IsValid())
+        return;
+
+    auto& presence = _presences[userid];
+    if (!presence.productid().empty())
+        return;
+
+    presence.set_userid(userid->to_string());
+    presence.set_status(utils::GetEnumValue(EOS_Presence_EStatus::EOS_PS_Online));
+    presence.set_productid(GetEOS_Platform()._product_id);
+    presence.set_productversion(EOSSDK_Client::Inst()._product_version);
+    presence.set_productname(EOSSDK_Client::Inst()._product_name);
+#if defined(__WINDOWS__)
+    presence.set_platform("WIN");
+#elif defined(__LINUX__)
+    presence.set_platform("LINUX");
+#elif defined(__APPLE__)
+    presence.set_platform("APPLE");
+#endif
+    presence.set_richtext("");
+
+    if (presence.records_size() == 0)
+    {
+        (*presence.mutable_records())["local_online_platform"] = "Unknown";
+        (*presence.mutable_records())["steam_display"] = "#Status_AtMainMenu";
+    }
+}
+
+void EOSSDK_Presence::set_local_join_info(std::string const& join_info)
+{
+    if (join_info.empty())
+        return;
+
+    (*get_myself().mutable_records())["EOS_JoinInfo"] = join_info;
+    send_my_presence_info_to_all_peers();
+}
+
+void EOSSDK_Presence::clear_local_join_info()
+{
+    get_myself().mutable_records()->erase("EOS_JoinInfo");
+    send_my_presence_info_to_all_peers();
 }
 
 Presence_Info_pb& EOSSDK_Presence::get_myself()
@@ -203,66 +255,55 @@ EOS_EResult EOSSDK_Presence::CopyPresence( const EOS_Presence_CopyPresenceOption
     auto presence = get_presence(Options->TargetUserId);
     if (presence == nullptr)
     {
+        auto user = GetEOS_Connect().get_user_by_userid(Options->TargetUserId);
+        if (user != GetEOS_Connect().get_end_users() && user->second.authentified)
+        {
+            ensure_default_peer_presence(Options->TargetUserId);
+            presence = get_presence(Options->TargetUserId);
+        }
+    }
+
+    if (presence == nullptr)
+    {
         set_nullptr(OutPresence);
         return EOS_EResult::EOS_NotFound;
     }
 
-    EOS_Presence_Info* presence_info = new EOS_Presence_Info;
+    auto dup_cstr = [](std::string const& value) -> char*
+    {
+        char* str = new char[value.length() + 1];
+        strncpy(str, value.c_str(), value.length() + 1);
+        return str;
+    };
 
-    presence_info->ApiVersion = EOS_PRESENCE_COPYPRESENCE_API_LATEST;
-    char *str;
-    size_t len;
+    EOS_Presence_Info* presence_info = new EOS_Presence_Info{};
+    presence_info->ApiVersion = EOS_PRESENCE_INFO_API_LATEST;
 
-    len = presence->platform().length() + 1;
-    str = new char[len];
-    strncpy(str, presence->platform().c_str(), len);
-    presence_info->Platform = str;
-
-    len = presence->productid().length() + 1;
-    str = new char[len];
-    strncpy(str, presence->productid().c_str(), len);
-    presence_info->ProductId = str;
-
-    len = presence->productname().length() + 1;
-    str = new char[len];
-    strncpy(str, presence->productname().c_str(), len);
-    presence_info->ProductName = str;
-
-    len = presence->productversion().length() + 1;
-    str = new char[len];
-    strncpy(str, presence->productversion().c_str(), len);
-    presence_info->ProductVersion = str;
-
-    len = presence->richtext().length() + 1;
-    str = new char[len];
-    strncpy(str, presence->richtext().c_str(), len);
-    presence_info->RichText = str;
+    presence_info->Platform = dup_cstr(presence->platform());
+    presence_info->ProductId = dup_cstr(presence->productid());
+    presence_info->ProductName = dup_cstr(presence->productname());
+    presence_info->ProductVersion = dup_cstr(presence->productversion());
+    presence_info->RichText = dup_cstr(presence->richtext());
+    presence_info->IntegratedPlatform = dup_cstr("Epic");
 
     presence_info->RecordsCount = presence->records_size();
     EOS_Presence_DataRecord* records = nullptr;
 
     if (presence->records_size())
     {
-        records = new EOS_Presence_DataRecord[presence->records_size()];
+        records = new EOS_Presence_DataRecord[static_cast<size_t>(presence->records_size())]{};
         auto record_it = presence->records().begin();
         for (int i = 0; i < presence->records_size(); ++i)
         {
-            len = record_it->first.length() + 1;
-            str = new char[len];
-            strncpy(str, record_it->first.c_str(), len);
-            records[i].Key = str;
-
-            len = record_it->second.length() + 1;
-            str = new char[len];
-            strncpy(str, record_it->second.c_str(), len);
-            records[i].Value = str;
-
+            records[i].ApiVersion = EOS_PRESENCE_DATARECORD_API_LATEST;
+            records[i].Key = dup_cstr(record_it->first);
+            records[i].Value = dup_cstr(record_it->second);
             ++record_it;
         }
     }
 
     presence_info->Records = records;
-    presence_info->Status = (EOS_Presence_EStatus)presence->status();
+    presence_info->Status = static_cast<EOS_Presence_EStatus>(presence->status());
     presence_info->UserId = Options->TargetUserId;
 
     *OutPresence = presence_info;
@@ -503,7 +544,7 @@ bool EOSSDK_Presence::send_presence_info_request(Network::peer_t const& peerid, 
 
     msg.set_source_id(user_id);
     msg.set_dest_id(peerid);
-    msg.set_game_id(Settings::Inst().appid);
+    msg.set_game_id(Settings::Inst().network_game_id());
 
     return GetNetwork().TCPSendTo(msg);
 }
@@ -521,10 +562,10 @@ bool EOSSDK_Presence::send_my_presence_info(Network::peer_t const& peerid)
 
     msg.set_source_id(user_id);
     msg.set_dest_id(peerid);
-    msg.set_game_id(Settings::Inst().appid);
+    msg.set_game_id(Settings::Inst().network_game_id());
 
     auto res = GetNetwork().TCPSendTo(msg);
-    presence->release_presence_info();
+    (void)presence->release_presence_info();
 
     return res;
 }
@@ -541,19 +582,19 @@ bool EOSSDK_Presence::send_my_presence_info_to_all_peers()
     msg.set_allocated_presence(presence);
 
     msg.set_source_id(user_id);
-    msg.set_game_id(Settings::Inst().appid);
+    msg.set_game_id(Settings::Inst().network_game_id());
 
     auto& users = GetEOS_Connect()._users;
     for (auto user_it = ++users.begin(); user_it != users.end(); ++user_it)
     {
-        if (user_it->second.authentified)
+        if (user_it->second.connected)
         {
             msg.set_dest_id(user_it->first->to_string());
             GetNetwork().TCPSendTo(msg);
         }
     }
     
-    presence->release_presence_info();
+    (void)presence->release_presence_info();
     return true;
 }
 
@@ -565,16 +606,19 @@ bool EOSSDK_Presence::on_peer_connect(Network_Message_pb const& msg, Network_Pee
     //TRACE_FUNC();
     GLOBAL_LOCK();
 
+    // Always exchange presence on peer connect (bootstrap), even before full Connect auth.
+    // Presence does not require EpicAccountId to be valid yet.
+    send_my_presence_info(msg.source_id());
+
     EOS_ProductUserId product_id = GetProductUserId(msg.source_id());
     auto pUser = GetEOS_Connect().get_user_by_productid(product_id);
-    if (pUser != GetEOS_Connect().get_end_users() && pUser->second.authentified)
+    if (pUser != GetEOS_Connect().get_end_users())
     {
         EOS_EpicAccountId account_id = GetEpicUserId(pUser->second.infos.userid());
         if (account_id->IsValid())
         {
             Presence_Info_Request_pb* req = new Presence_Info_Request_pb;
             send_presence_info_request(pUser->first->to_string(), req);
-            //set_user_status(account_id, EOS_Presence_EStatus::EOS_PS_Online);
         }
     }
 
@@ -632,20 +676,12 @@ bool EOSSDK_Presence::on_presence_infos(Network_Message_pb const& msg, Presence_
         {
             presence_changed = true;
         }
-        else if(presence_infos.records_size())
+        else
         {
-            for (auto const& record : presence_infos.records())
+            for (auto const& record : infos.records())
             {
-                auto it = infos.records().find(record.first);
-                if (it != infos.records().end())
-                {
-                    if (record.second != it->second)
-                    {
-                        presence_changed = true;
-                        break;
-                    }
-                }
-                else
+                auto old_it = presence_infos.records().find(record.first);
+                if (old_it == presence_infos.records().end() || old_it->second != record.second)
                 {
                     presence_changed = true;
                     break;
@@ -667,7 +703,15 @@ bool EOSSDK_Presence::on_presence_infos(Network_Message_pb const& msg, Presence_
         if (presence_changed)
         {
             presence_infos = infos;
+            if (presence_infos.userid().empty())
+                presence_infos.set_userid(userid->to_string());
             trigger_presence_change(userid);
+        }
+        else if (presence_infos.userid().empty())
+        {
+            presence_infos = infos;
+            if (presence_infos.userid().empty())
+                presence_infos.set_userid(userid->to_string());
         }
     }
 

@@ -915,6 +915,33 @@ EOS_STRUCT(EOS_SessionDetails_Settings003, (
 	EOS_Bool bSanctionsEnabled;
 ));
 
+#define EOS_SESSIONDETAILS_SETTINGS_API_004 4
+
+/** Common settings associated with a single session (SDK 1.16+), adds platform restrictions. */
+EOS_STRUCT(EOS_SessionDetails_Settings004, (
+	/** API Version: Set this to EOS_SESSIONDETAILS_SETTINGS_API_LATEST. */
+	int32_t ApiVersion;
+	/** The main indexed parameter for this session, can be any string (ie "Region:GameMode") */
+	const char* BucketId;
+	/** Number of total players allowed in the session */
+	uint32_t NumPublicConnections;
+	/** Are players allowed to join the session while it is in the "in progress" state */
+	EOS_Bool bAllowJoinInProgress;
+	/** Permission level describing allowed access to the session when joining or searching for the session */
+	EOS_EOnlineSessionPermissionLevel PermissionLevel;
+	/** Are players allowed to send invites for the session */
+	EOS_Bool bInvitesAllowed;
+	/** Are sanctioned players allowed to join - sanctioned players will be rejected if set to true */
+	EOS_Bool bSanctionsEnabled;
+	/**
+	 * Array of platform IDs indicating the player platforms allowed to register with the session.
+	 * If null, the session will be unrestricted.
+	 */
+	const uint32_t* AllowedPlatformIds;
+	/** Number of platform IDs in the array */
+	uint32_t AllowedPlatformIdsCount;
+));
+
 /** The most recent version of the EOS_SessionDetails_Info struct. */
 #define EOS_SESSIONDETAILS_INFO_API_001 1
 
@@ -930,6 +957,26 @@ EOS_STRUCT(EOS_SessionDetails_Info001, (
 	uint32_t NumOpenPublicConnections;
 	/** Reference to the additional settings associated with this session */
 	const EOS_SessionDetails_Settings* Settings;
+));
+
+#define EOS_SESSIONDETAILS_INFO_API_002 2
+
+/** Internal details about a session (SDK 1.16+), adds owner fields. */
+EOS_STRUCT(EOS_SessionDetails_Info002, (
+	/** API Version: Set this to EOS_SESSIONDETAILS_INFO_API_LATEST. */
+	int32_t ApiVersion;
+	/** Session ID assigned by the backend service */
+	const char* SessionId;
+	/** IP address of this session as visible by the backend service */
+	const char* HostAddress;
+	/** Number of remaining open spaces on the session (NumPublicConnections - RegisteredPlayers */
+	uint32_t NumOpenPublicConnections;
+	/** Reference to the additional settings associated with this session */
+	const EOS_SessionDetails_Settings* Settings;
+	/** The Product User ID of the session owner. Null if the session is not owned by a user. */
+	EOS_ProductUserId OwnerUserId;
+	/** The client id of the session owner. Null if the session is not owned by a server. */
+	const char* OwnerServerClientId;
 ));
 
 EOS_DECLARE_FUNC(void) EOS_SessionDetails_Info_Release(EOS_SessionDetails_Info* SessionInfo);

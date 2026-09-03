@@ -18,11 +18,13 @@
  */
 
 #include "eossdk_presence.h"
+#include "eos_api_trace.h"
 
 using namespace sdk;
 
 EOS_DECLARE_FUNC(void) EOS_Presence_QueryPresence(EOS_HPresence Handle, const EOS_Presence_QueryPresenceOptions* Options, void* ClientData, const EOS_Presence_OnQueryPresenceCompleteCallback CompletionDelegate)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return;
 
@@ -32,6 +34,7 @@ EOS_DECLARE_FUNC(void) EOS_Presence_QueryPresence(EOS_HPresence Handle, const EO
 
 EOS_DECLARE_FUNC(EOS_Bool) EOS_Presence_HasPresence(EOS_HPresence Handle, const EOS_Presence_HasPresenceOptions* Options)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_FALSE;
 
@@ -41,6 +44,7 @@ EOS_DECLARE_FUNC(EOS_Bool) EOS_Presence_HasPresence(EOS_HPresence Handle, const 
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Presence_CopyPresence(EOS_HPresence Handle, const EOS_Presence_CopyPresenceOptions* Options, EOS_Presence_Info** OutPresence)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -50,6 +54,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Presence_CopyPresence(EOS_HPresence Handle, co
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Presence_CreatePresenceModification(EOS_HPresence Handle, const EOS_Presence_CreatePresenceModificationOptions* Options, EOS_HPresenceModification* OutPresenceModificationHandle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -59,6 +64,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Presence_CreatePresenceModification(EOS_HPrese
 
 EOS_DECLARE_FUNC(void) EOS_Presence_SetPresence(EOS_HPresence Handle, const EOS_Presence_SetPresenceOptions* Options, void* ClientData, const EOS_Presence_SetPresenceCompleteCallback CompletionDelegate)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return;
 
@@ -68,6 +74,7 @@ EOS_DECLARE_FUNC(void) EOS_Presence_SetPresence(EOS_HPresence Handle, const EOS_
 
 EOS_DECLARE_FUNC(EOS_NotificationId) EOS_Presence_AddNotifyOnPresenceChanged(EOS_HPresence Handle, const EOS_Presence_AddNotifyOnPresenceChangedOptions* Options, void* ClientData, const EOS_Presence_OnPresenceChangedCallback NotificationHandler)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_INVALID_NOTIFICATIONID;
 
@@ -77,6 +84,7 @@ EOS_DECLARE_FUNC(EOS_NotificationId) EOS_Presence_AddNotifyOnPresenceChanged(EOS
 
 EOS_DECLARE_FUNC(void) EOS_Presence_RemoveNotifyOnPresenceChanged(EOS_HPresence Handle, EOS_NotificationId NotificationId)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return;
 
@@ -86,6 +94,7 @@ EOS_DECLARE_FUNC(void) EOS_Presence_RemoveNotifyOnPresenceChanged(EOS_HPresence 
 
 EOS_DECLARE_FUNC(EOS_NotificationId) EOS_Presence_AddNotifyJoinGameAccepted(EOS_HPresence Handle, const EOS_Presence_AddNotifyJoinGameAcceptedOptions* Options, void* ClientData, const EOS_Presence_OnJoinGameAcceptedCallback NotificationFn)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_INVALID_NOTIFICATIONID;
 
@@ -95,6 +104,7 @@ EOS_DECLARE_FUNC(EOS_NotificationId) EOS_Presence_AddNotifyJoinGameAccepted(EOS_
 
 EOS_DECLARE_FUNC(void) EOS_Presence_RemoveNotifyJoinGameAccepted(EOS_HPresence Handle, EOS_NotificationId InId)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return;
 
@@ -104,6 +114,7 @@ EOS_DECLARE_FUNC(void) EOS_Presence_RemoveNotifyJoinGameAccepted(EOS_HPresence H
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Presence_GetJoinInfo(EOS_HPresence Handle, const EOS_Presence_GetJoinInfoOptions* Options, char* OutBuffer, int32_t* InOutBufferLength)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -119,6 +130,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Presence_GetJoinInfo(EOS_HPresence Handle, con
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_PresenceModification_SetStatus(EOS_HPresenceModification Handle, const EOS_PresenceModification_SetStatusOptions* Options)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -137,6 +149,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_PresenceModification_SetStatus(EOS_HPresenceMo
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_PresenceModification_SetRawRichText(EOS_HPresenceModification Handle, const EOS_PresenceModification_SetRawRichTextOptions* Options)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -157,6 +170,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_PresenceModification_SetRawRichText(EOS_HPrese
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_PresenceModification_SetData(EOS_HPresenceModification Handle, const EOS_PresenceModification_SetDataOptions* Options)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -177,6 +191,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_PresenceModification_SetData(EOS_HPresenceModi
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_PresenceModification_DeleteData(EOS_HPresenceModification Handle, const EOS_PresenceModification_DeleteDataOptions* Options)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -195,6 +210,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_PresenceModification_DeleteData(EOS_HPresenceM
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_PresenceModification_SetJoinInfo(EOS_HPresenceModification Handle, const EOS_PresenceModification_SetJoinInfoOptions* Options)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -210,6 +226,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_PresenceModification_SetJoinInfo(EOS_HPresence
  */
 EOS_DECLARE_FUNC(void) EOS_Presence_Info_Release(EOS_Presence_Info* PresenceInfo)
 {
+    EOS_API_TRACE();
     TRACE_FUNC();
     if (PresenceInfo == nullptr)
         return;
@@ -219,6 +236,7 @@ EOS_DECLARE_FUNC(void) EOS_Presence_Info_Release(EOS_Presence_Info* PresenceInfo
     delete[] PresenceInfo->ProductName;
     delete[] PresenceInfo->ProductVersion;
     delete[] PresenceInfo->RichText;
+    delete[] PresenceInfo->IntegratedPlatform;
     for (int i = 0; i < PresenceInfo->RecordsCount; ++i)
     {
         delete[] PresenceInfo->Records[i].Key;
@@ -238,6 +256,7 @@ EOS_DECLARE_FUNC(void) EOS_Presence_Info_Release(EOS_Presence_Info* PresenceInfo
 */
 EOS_DECLARE_FUNC(void) EOS_PresenceModification_Release(EOS_HPresenceModification PresenceModificationHandle)
 {
+    EOS_API_TRACE();
     TRACE_FUNC();
 
     auto pInst = reinterpret_cast<EOSSDK_PresenceModification*>(PresenceModificationHandle);

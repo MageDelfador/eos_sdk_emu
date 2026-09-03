@@ -466,7 +466,7 @@ uint32_t EOSSDK_Ecom::GetEntitlementsCount(const EOS_Ecom_GetEntitlementsCountOp
     if (Options == nullptr)
         return 0;
 
-    return _queried_entitlements.size();
+    return static_cast<uint32_t>(_queried_entitlements.size());
 }
 
 /**
@@ -488,7 +488,7 @@ uint32_t EOSSDK_Ecom::GetEntitlementsByNameCount(const EOS_Ecom_GetEntitlementsB
     if (Options == nullptr || Options->EntitlementName == nullptr)
         return 0;
 
-    uint32_t count = std::count_if(_queried_entitlements.begin(), _queried_entitlements.end(), [Options]( std::pair<const std::string, fifo_json*> &item) 
+    uint32_t count = static_cast<uint32_t>(std::count_if(_queried_entitlements.begin(), _queried_entitlements.end(), [Options]( std::pair<const std::string, fifo_json*> &item)
     {
         try
         {
@@ -498,7 +498,7 @@ uint32_t EOSSDK_Ecom::GetEntitlementsByNameCount(const EOS_Ecom_GetEntitlementsB
         {
             return false;
         }
-    });
+    }));
 
     return count;
 }

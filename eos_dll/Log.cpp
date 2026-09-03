@@ -21,37 +21,50 @@
 
 #include "Log.h"
 #include "common_includes.h"
+#include <mutex>
+
+static std::ofstream& emu_log_file()
+{
+    static std::ofstream file;
+    static std::once_flag once;
+    std::call_once(once, []() {
+        std::string const log_dir = FileManager::join(get_userdata_path(), emu_savepath);
+        FileManager::create_directory(log_dir);
+        file.open(FileManager::join(log_dir, "NemirtingasEpicEmu.log"), std::ios::out | std::ios::app);
+    });
+    return file;
+}
+
+void Log::default_log_func(void* user_param, Log::LogLevel lv, const char* log_message)
+{
+    static thread_local bool in_log = false;
+    if (in_log)
+    {
+#if defined(__WINDOWS__)
+        OutputDebugStringA(log_message);
+#endif
+        return;
+    }
+
+    in_log = true;
+    std::ofstream& log_file = emu_log_file();
+
+#if defined(__WINDOWS__)
+    OutputDebugStringA(log_message);
+#endif
+
+    if (log_file)
+    {
+        log_file << log_message;
+        log_file.flush();
+    }
+
+    in_log = false;
+}
 
 decltype(Log::_log_user_param) Log::_log_user_param;
 decltype(Log::_log_level)      Log::_log_level = Log::LogLevel::OFF;
 decltype(Log::_log_func)       Log::_log_func  = default_log_func;
-
-void Log::default_log_func(void* user_param, Log::LogLevel lv, const char* log_message)
-{
-    static std::ofstream log_file("nemirtingassteamemu.log", std::ios::trunc | std::ios::out);
-
-#if defined(__WINDOWS__)
-    if (IsDebuggerPresent())
-    {
-        OutputDebugString(log_message);
-    }
-    else
-    {
-        static bool console = false;
-        if (!console)
-        {
-            AllocConsole();
-            freopen("CONOUT$", "w", stdout);
-        }
-
-        fprintf(stdout, "%s", log_message);
-    }
-#endif
-
-    log_file << log_message;
-    log_file.flush();
-    fprintf(stderr, "%s", log_message);
-}
 
 bool Log::_trace(const char* format, va_list argptr)
 {

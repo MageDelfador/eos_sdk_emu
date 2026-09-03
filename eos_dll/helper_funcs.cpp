@@ -37,16 +37,33 @@ union epicid_t {
     }
 };
 
-LOCAL_API std::random_device& get_rd()
-{
-    // Random device generator
-    static std::random_device rd;
-    return rd;
-}
-
 LOCAL_API std::mt19937_64& get_gen()
 {
-    static std::mt19937_64 gen(get_rd()());
+    static std::mt19937_64 gen = []() {
+        uint64_t seed = 0;
+
+#if defined(__WINDOWS__)
+        LARGE_INTEGER counter = {};
+        QueryPerformanceCounter(&counter);
+        seed ^= static_cast<uint64_t>(counter.QuadPart);
+        seed ^= static_cast<uint64_t>(GetTickCount64()) << 1;
+        seed ^= (static_cast<uint64_t>(GetCurrentProcessId()) << 32) | GetCurrentThreadId();
+#else
+        try
+        {
+            std::random_device rd;
+            seed = static_cast<uint64_t>(rd()) << 32;
+            seed ^= static_cast<uint64_t>(rd());
+        }
+        catch (...)
+        {
+            seed = static_cast<uint64_t>(
+                std::chrono::steady_clock::now().time_since_epoch().count());
+        }
+#endif
+
+        return std::mt19937_64(seed ? seed : 0xC0FFEEULL);
+    }();
     return gen;
 }
 
@@ -136,6 +153,16 @@ LOCAL_API std::string generate_epic_id_user_from_name(std::string const& usernam
     return generate_account_id_from_name(username);
 }
 
+LOCAL_API std::string generate_epic_id_from_steam64(std::string const& steam64)
+{
+    return generate_account_id_from_name("steam64:" + steam64);
+}
+
+LOCAL_API std::string generate_productuserid_from_epicid(std::string const& epicid)
+{
+    return generate_account_id_from_name("productuserid:" + epicid);
+}
+
 LOCAL_API void fatal_throw(const char* msg)
 {
     APP_LOG(Log::LogLevel::FATAL, "%s", msg);
@@ -209,6 +236,7 @@ LOCAL_API std::string get_callback_name(int iCallback)
         // P2P
         I_CALLBACK(EOS_P2P_OnIncomingConnectionRequestInfo);
         I_CALLBACK(EOS_P2P_OnRemoteConnectionClosedInfo);
+        I_CALLBACK(EOS_P2P_OnPeerConnectionEstablishedInfo);
         I_CALLBACK(EOS_P2P_OnQueryNATTypeCompleteInfo);
         // PlayerDataStorage
         I_CALLBACK(EOS_PlayerDataStorage_QueryFileCallbackInfo);

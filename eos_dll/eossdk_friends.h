@@ -30,6 +30,19 @@ namespace sdk
     {
         std::set<EOS_EpicAccountId> _friends;
 
+        struct pending_query_friends_t
+        {
+            pFrameResult_t result;
+            std::chrono::steady_clock::time_point queued;
+            std::chrono::steady_clock::time_point last_poke;
+        };
+
+        std::vector<pending_query_friends_t> _pending_query_friends;
+
+        void rebuild_friends_from_connect();
+        bool has_connected_unauthentified_peers() const;
+        void notify_friend_update(EOS_EpicAccountId userid, EOS_EFriendsStatus previous, EOS_EFriendsStatus current);
+
     public:
         EOSSDK_Friends();
         ~EOSSDK_Friends();
@@ -38,6 +51,9 @@ namespace sdk
         virtual bool RunCallbacks(pFrameResult_t res);
         virtual void FreeCallback(pFrameResult_t res);
 
+        void add_friend(EOS_EpicAccountId userid);
+        void sync_friends_from_connect();
+        void complete_pending_query_friends();
         void QueryFriends(const EOS_Friends_QueryFriendsOptions* Options, void* ClientData, const EOS_Friends_OnQueryFriendsCallback CompletionDelegate);
         void SendInvite(const EOS_Friends_SendInviteOptions* Options, void* ClientData, const EOS_Friends_OnSendInviteCallback CompletionDelegate);
         void AcceptInvite(const EOS_Friends_AcceptInviteOptions* Options, void* ClientData, const EOS_Friends_OnAcceptInviteCallback CompletionDelegate);

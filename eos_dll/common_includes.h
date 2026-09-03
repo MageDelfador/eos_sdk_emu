@@ -19,8 +19,14 @@
 
 #pragma once
 
-
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4267)
+#endif
 #include <network_proto.pb.h>
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 #define __WINDOWS__ 1
 

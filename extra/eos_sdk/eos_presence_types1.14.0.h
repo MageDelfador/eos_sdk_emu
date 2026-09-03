@@ -45,6 +45,7 @@ EOS_STRUCT(EOS_Presence_DataRecord001, (
 
 
 #define EOS_PRESENCE_INFO_API_002 2
+#define EOS_PRESENCE_INFO_API_003 3
 
 /**
  * All the known presence information for a specific user. This object must be released by calling EOS_Presence_Info_Release.
@@ -73,6 +74,8 @@ EOS_STRUCT(EOS_Presence_Info002, (
 	const EOS_Presence_DataRecord* Records;
 	/** The user-facing name for the product the user is logged in from */
 	const char* ProductName;
+	/** The integrated platform that the user is logged in with (SDK 1.19+) */
+	const char* IntegratedPlatform;
 ));
 
 
@@ -127,6 +130,7 @@ EOS_STRUCT(EOS_Presence_HasPresenceOptions001, (
 
 
 #define EOS_PRESENCE_COPYPRESENCE_API_002 2
+#define EOS_PRESENCE_COPYPRESENCE_API_003 3
 /**
  * Data for the EOS_Presence_CopyPresenceOptions function.
  */

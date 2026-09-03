@@ -20,10 +20,77 @@
 #include "eossdk_sessions.h"
 #include "eossdk_platform.h"
 #include "eos_client_api.h"
+#include "eos_memory.h"
 #include "settings.h"
+#include "eos_api_trace.h"
 
 namespace sdk
 {
+
+template<typename AttrEntry>
+EOS_SessionDetails_Attribute* allocate_session_attribute_from_entry(AttrEntry const& attr_entry)
+{
+    EOS_SessionDetails_Attribute* pAttribute = eos_allocate_struct<EOS_SessionDetails_Attribute>();
+    EOS_Sessions_AttributeData* pData = eos_allocate_struct<EOS_Sessions_AttributeData>();
+    if (pAttribute == nullptr || pData == nullptr)
+    {
+        eos_release_bytes(pData);
+        eos_release_bytes(pAttribute);
+        return nullptr;
+    }
+
+    pData->ApiVersion = EOS_SESSIONS_SESSIONATTRIBUTEDATA_API_LATEST;
+    pData->Key = eos_allocate_c_string(attr_entry.first);
+    if (pData->Key == nullptr)
+    {
+        eos_release_bytes(pData);
+        eos_release_bytes(pAttribute);
+        return nullptr;
+    }
+
+    switch (attr_entry.second.value().value_case())
+    {
+        case Session_Attr_Value::ValueCase::kB:
+            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_BOOLEAN;
+            pData->Value.AsBool = attr_entry.second.value().b() ? EOS_TRUE : EOS_FALSE;
+            break;
+
+        case Session_Attr_Value::ValueCase::kD:
+            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_DOUBLE;
+            pData->Value.AsDouble = attr_entry.second.value().d();
+            break;
+
+        case Session_Attr_Value::ValueCase::kI:
+            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_INT64;
+            pData->Value.AsInt64 = attr_entry.second.value().i();
+            break;
+
+        case Session_Attr_Value::ValueCase::kS:
+        {
+            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_STRING;
+            pData->Value.AsUtf8 = eos_allocate_c_string(attr_entry.second.value().s());
+            if (pData->Value.AsUtf8 == nullptr)
+            {
+                eos_release_bytes(const_cast<char*>(pData->Key));
+                eos_release_bytes(pData);
+                eos_release_bytes(pAttribute);
+                return nullptr;
+            }
+        }
+        break;
+
+        default:
+            eos_release_bytes(const_cast<char*>(pData->Key));
+            eos_release_bytes(pData);
+            eos_release_bytes(pAttribute);
+            return nullptr;
+    }
+
+    pAttribute->ApiVersion = EOS_SESSIONDETAILS_ATTRIBUTE_API_LATEST;
+    pAttribute->Data = pData;
+    pAttribute->AdvertisementType = static_cast<EOS_ESessionAttributeAdvertisementType>(attr_entry.second.advertisement_type());
+    return pAttribute;
+}
 
 /**
  * This class represents the details of a session, including its session properties and the attribution associated with it
@@ -56,63 +123,50 @@ EOS_EResult EOSSDK_SessionDetails::CopyInfo(const EOS_SessionDetails_CopyInfoOpt
         return EOS_EResult::EOS_InvalidParameters;
     }
 
-    EOS_SessionDetails_Info *pDetails = new EOS_SessionDetails_Info;
-    EOS_SessionDetails_Settings *pSettings = new EOS_SessionDetails_Settings;
-    
-    pSettings->ApiVersion = EOS_SESSIONDETAILS_SETTINGS_API_LATEST;
-    pSettings->bAllowJoinInProgress = _infos.join_in_progress_allowed();
-    pSettings->bInvitesAllowed = _infos.invites_allowed();
-    pSettings->PermissionLevel = static_cast<EOS_EOnlineSessionPermissionLevel>(_infos.permission_level());
-    pSettings->NumPublicConnections = _infos.max_players();
+    *OutSessionInfo = nullptr;
+
+    Session_Infos_pb infos_copy = _infos;
+    GetEOS_Sessions().prepare_session_infos_for_network(infos_copy);
+
+    EOS_SessionDetails_Info* pDetails = eos_allocate_struct<EOS_SessionDetails_Info>();
+    EOS_SessionDetails_Settings* pSettings = eos_allocate_struct<EOS_SessionDetails_Settings>();
+    if (pDetails == nullptr || pSettings == nullptr)
     {
-        std::string const& bucket_id = _infos.bucket_id();
-        char* str;
-        if (!bucket_id.empty())
-        {
-            str = new char[bucket_id.length() + 1];
-            strncpy(str, bucket_id.c_str(), bucket_id.length() + 1);
-        }
-        else
-        {
-            str = new char[1];
-            *str = 0;
-        }
-        pSettings->BucketId = str;
+        eos_release_bytes(pSettings);
+        eos_release_bytes(pDetails);
+        *OutSessionInfo = nullptr;
+        return EOS_EResult::EOS_UnexpectedError;
     }
 
-    pDetails->ApiVersion = EOS_SESSIONDETAILS_COPYINFO_API_LATEST;
+    pSettings->ApiVersion = EOS_SESSIONDETAILS_SETTINGS_API_LATEST;
+    pSettings->BucketId = eos_allocate_c_string(infos_copy.bucket_id());
+    pSettings->NumPublicConnections = infos_copy.max_players();
+    pSettings->bAllowJoinInProgress = infos_copy.join_in_progress_allowed() ? EOS_TRUE : EOS_FALSE;
+    pSettings->PermissionLevel = static_cast<EOS_EOnlineSessionPermissionLevel>(infos_copy.permission_level());
+    pSettings->bInvitesAllowed = infos_copy.invites_allowed() ? EOS_TRUE : EOS_FALSE;
+    pSettings->bSanctionsEnabled = EOS_FALSE;
+    pSettings->AllowedPlatformIds = nullptr;
+    pSettings->AllowedPlatformIdsCount = 0;
+
+    pDetails->ApiVersion = EOS_SESSIONDETAILS_INFO_API_LATEST;
+    pDetails->SessionId = eos_allocate_c_string(infos_copy.session_id());
+    pDetails->HostAddress = eos_allocate_c_string(
+        GetEOS_Sessions().resolve_session_host_address_for_copy(infos_copy));
     {
-        std::string const& session_id = _infos.session_id();
-        char *str;
-        if (!session_id.empty())
-        {
-            str = new char[session_id.length() + 1];
-            strncpy(str, session_id.c_str(), session_id.length() + 1);
-        }
-        else
-        {
-            str = new char[1];
-            *str = '\0';
-        }
-        pDetails->SessionId = str;
+        int const open = static_cast<int>(infos_copy.max_players()) - infos_copy.players_size();
+        pDetails->NumOpenPublicConnections = open > 0 ? static_cast<uint32_t>(open) : 0u;
     }
-    {
-        std::string const& hostaddr = _infos.host_address();
-        char* str;
-        if (!hostaddr.empty())
-        {
-            str = new char[hostaddr.length() + 1];
-            strncpy(str, hostaddr.c_str(), hostaddr.length() + 1);
-        }
-        else
-        {
-            str = new char[1];
-            *str = '\0';
-        }
-        pDetails->HostAddress = str;
-    }
-    pDetails->NumOpenPublicConnections = _infos.max_players() - _infos.players_size();
     pDetails->Settings = pSettings;
+    pDetails->OwnerUserId = owner_user_id_for_session_infos(infos_copy);
+    pDetails->OwnerServerClientId = nullptr;
+
+    if (pSettings->BucketId == nullptr || pDetails->SessionId == nullptr || pDetails->HostAddress == nullptr)
+    {
+        EOS_SessionDetails_Info_Release(pDetails);
+        *OutSessionInfo = nullptr;
+        return EOS_EResult::EOS_UnexpectedError;
+    }
+
     *OutSessionInfo = pDetails;
     
     return EOS_EResult::EOS_Success;
@@ -159,58 +213,25 @@ EOS_EResult EOSSDK_SessionDetails::CopySessionAttributeByIndex(const EOS_Session
         *OutSessionAttribute = nullptr;
         return EOS_EResult::EOS_InvalidParameters;
     }
-    
-    EOS_SessionDetails_Attribute* pAttr = new EOS_SessionDetails_Attribute;
-    EOS_Sessions_AttributeData* pData = new EOS_Sessions_AttributeData;
 
     auto it = _infos.attributes().begin();
     std::advance(it, Options->AttrIndex);
-    
-    pData->ApiVersion = EOS_SESSIONS_SESSIONATTRIBUTEDATA_API_LATEST;
+
+    if (sdk::g_eos_in_game_callback != 0)
     {
-        std::string const& key = it->first;
-        char* str = new char[key.length() + 1];
-        strncpy(str, key.c_str(), key.length() + 1);
-        pData->Key = str;
+        APP_LOG(Log::LogLevel::DEBUG, "SessionDetails attr[%u] key=%s type=%d",
+            Options->AttrIndex,
+            it->first.c_str(),
+            static_cast<int>(it->second.value().value_case()));
     }
 
-    switch (it->second.value().value_case())
+    EOS_SessionDetails_Attribute* pAttr = allocate_session_attribute_from_entry(*it);
+    if (pAttr == nullptr)
     {
-        case Session_Attr_Value::ValueCase::kB: 
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_BOOLEAN;
-            pData->Value.AsBool = it->second.value().b();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kD:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_DOUBLE;
-            pData->Value.AsDouble = it->second.value().d();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kI:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_INT64;
-            pData->Value.AsInt64 = it->second.value().i();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kS:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_STRING;
-            std::string const& value = it->second.value().s();
-            char* str = new char[value.length() + 1];
-            strncpy(str, value.c_str(), value.length() + 1);
-            pData->Value.AsUtf8 = str;
-        }
+        *OutSessionAttribute = nullptr;
+        return EOS_EResult::EOS_UnexpectedError;
     }
-    
-    
-    pAttr->ApiVersion = EOS_SESSIONDETAILS_COPYSESSIONATTRIBUTEBYINDEX_API_LATEST;
-    pAttr->Data = pData;
-    pAttr->AdvertisementType = static_cast<EOS_ESessionAttributeAdvertisementType>(it->second.advertisement_type());
+
     *OutSessionAttribute = pAttr;
     return EOS_EResult::EOS_Success;
 }
@@ -240,9 +261,6 @@ EOS_EResult EOSSDK_SessionDetails::CopySessionAttributeByKey(const EOS_SessionDe
         return EOS_EResult::EOS_InvalidParameters;
     }
     
-    EOS_SessionDetails_Attribute* pAttr = new EOS_SessionDetails_Attribute;
-    EOS_Sessions_AttributeData* pData = new EOS_Sessions_AttributeData;
-
     auto it = _infos.attributes().find(Options->AttrKey);
     if (it == _infos.attributes().end())
     {
@@ -250,51 +268,12 @@ EOS_EResult EOSSDK_SessionDetails::CopySessionAttributeByKey(const EOS_SessionDe
         return EOS_EResult::EOS_NotFound;
     }
 
-    pData->ApiVersion = EOS_SESSIONS_SESSIONATTRIBUTEDATA_API_LATEST;
+    EOS_SessionDetails_Attribute* pAttr = allocate_session_attribute_from_entry(*it);
+    if (pAttr == nullptr)
     {
-        std::string const& key = it->first;
-        char* str = new char[key.length() + 1];
-        strncpy(str, key.c_str(), key.length() + 1);
-        pData->Key = str;
+        *OutSessionAttribute = nullptr;
+        return EOS_EResult::EOS_UnexpectedError;
     }
-
-    switch (it->second.value().value_case())
-    {
-        case Session_Attr_Value::ValueCase::kB:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_BOOLEAN;
-            pData->Value.AsBool = it->second.value().b();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kD:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_DOUBLE;
-            pData->Value.AsDouble = it->second.value().d();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kI:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_INT64;
-            pData->Value.AsInt64 = it->second.value().i();
-        }
-        break;
-
-        case Session_Attr_Value::ValueCase::kS:
-        {
-            pData->ValueType = EOS_ESessionAttributeType::EOS_AT_STRING;
-            std::string const& value = it->second.value().s();
-            char* str = new char[value.length() + 1];
-            strncpy(str, value.c_str(), value.length() + 1);
-            pData->Value.AsUtf8 = str;
-        }
-    }
-
-
-    pAttr->ApiVersion = EOS_SESSIONDETAILS_COPYSESSIONATTRIBUTEBYINDEX_API_LATEST;
-    pAttr->Data = pData;
-    pAttr->AdvertisementType = static_cast<EOS_ESessionAttributeAdvertisementType>(it->second.advertisement_type());
 
     *OutSessionAttribute = pAttr;
     return EOS_EResult::EOS_Success;

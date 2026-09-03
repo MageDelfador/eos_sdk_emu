@@ -20,6 +20,8 @@
 #include "callback_manager.h"
 #include "network.h"
 #include "eossdk_platform.h"
+#include "eos_api_trace.h"
+#include "helper_funcs.h"
 
 constexpr static std::chrono::seconds cleanup_timeout(60);
 
@@ -176,9 +178,15 @@ void Callback_Manager::run_callbacks()
             {
                 if (res->done || frame->RunCallbacks(res))
                 {
-                    APP_LOG(Log::LogLevel::DEBUG, "Callback ready: %s", get_callback_name(res->ICallback()).c_str());
+                    const std::string callback_name = get_callback_name(res->ICallback());
+                    APP_LOG(Log::LogLevel::DEBUG, "Callback ready: %s", callback_name.c_str());
+                    APP_LOG(Log::LogLevel::DEBUG, "Callback invoke: %s", callback_name.c_str());
                     if (res->GetFunc() != nullptr)
+                    {
+                        EOS_GAME_CALLBACK_SCOPE();
                         res->GetFunc()(res->GetFuncParam());
+                    }
+                    APP_LOG(Log::LogLevel::DEBUG, "Callback returned: %s", callback_name.c_str());
 
                     frame->FreeCallback(res);
                     result_it = results.erase(result_it);

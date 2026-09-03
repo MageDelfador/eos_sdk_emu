@@ -37,6 +37,9 @@ private:
 
     std::string config_path;
 
+    void apply_save_directories();
+    void load_settings_defaults();
+
 public:
     EOS_EpicAccountId userid;
     EOS_ProductUserId productuserid;
@@ -45,15 +48,23 @@ public:
     std::string savepath;
     std::string gamename;
     std::string appid;
+    std::string steam64;
+    std::string steam_appid;
+    std::string eos_product_id;
     std::string custom_broadcast;
+    std::string eos_sdk_version;
     bool unlock_dlcs;
-    bool enable_overlay;
     bool disable_online_networking;
+    bool steam_passthrough;
 
     ~Settings();
 
     void load_settings();
     void save_settings();
+    void apply_runtime_product_id(std::string const& product_id);
+
+    std::string network_game_id() const;
+    bool matches_network_game_id(std::string const& remote_game_id) const;
 };
 
 #endif

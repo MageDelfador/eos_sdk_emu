@@ -169,7 +169,7 @@ void EOSSDK_PlayerDataStorage::QueryFileList(const EOS_PlayerDataStorage_QueryFi
             get_metadata(file_name);
         }
 
-        qflci.FileCount = _files_cache.size();
+        qflci.FileCount = static_cast<uint32_t>(_files_cache.size());
         qflci.ResultCode = EOS_EResult::EOS_Success;
     }
 
@@ -219,7 +219,7 @@ EOS_EResult EOSSDK_PlayerDataStorage::CopyFileMetadataByFilename(const EOS_Playe
             strncpy(str, it->second.md5sum.c_str(), len);
             metadata->MD5Hash = str;
         }
-        metadata->FileSizeBytes = it->second.file_size;
+        metadata->FileSizeBytes = static_cast<uint32_t>(it->second.file_size);
 
         *OutMetadata = metadata;
     }
@@ -249,7 +249,7 @@ EOS_EResult EOSSDK_PlayerDataStorage::GetFileMetadataCount(const EOS_PlayerDataS
         return EOS_EResult::EOS_InvalidParameters;
     }
 
-    *OutFileMetadataCount = _files_cache.size();
+    *OutFileMetadataCount = static_cast<int32_t>(_files_cache.size());
     return EOS_EResult::EOS_Success;
 }
 
@@ -293,7 +293,7 @@ EOS_EResult EOSSDK_PlayerDataStorage::CopyFileMetadataAtIndex(const EOS_PlayerDa
         strncpy(str, it->second.md5sum.c_str(), len);
         metadata->MD5Hash = str;
     }
-    metadata->FileSizeBytes = it->second.file_size;
+    metadata->FileSizeBytes = static_cast<uint32_t>(it->second.file_size);
 
     *OutMetadata = metadata;
 
@@ -616,7 +616,7 @@ bool EOSSDK_PlayerDataStorage::RunCallbacks(pFrameResult_t res)
                 }
 
                 rfdci.DataChunk = &transfert._file_buffer[0];
-                rfdci.DataChunkLengthBytes = read_len;
+                rfdci.DataChunkLengthBytes = static_cast<uint32_t>(read_len);
                 switch (transfert._read_callback(&rfdci))
                 {
                     case EOS_PlayerDataStorage_EReadResult::EOS_RR_FailRequest:

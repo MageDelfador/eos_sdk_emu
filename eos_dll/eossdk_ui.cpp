@@ -29,6 +29,92 @@ EOSSDK_UI::EOSSDK_UI()
 EOSSDK_UI::~EOSSDK_UI()
 {}
 
+EOS_UI_EventId EOSSDK_UI::register_lobby_join_event(Lobby_Infos_pb const& infos)
+{
+    GLOBAL_LOCK();
+    std::lock_guard<std::mutex> lk(_ui_mutex);
+
+    EOS_UI_EventId const event_id = _next_event_id++;
+    ui_event_t event;
+    event.kind = ui_event_kind_t::lobby_join;
+    event.lobby_infos = infos;
+    event.target_user = nullptr;
+    _ui_events[event_id] = std::move(event);
+    return event_id;
+}
+
+EOS_UI_EventId EOSSDK_UI::register_session_join_event(Session_Infos_pb const& infos)
+{
+    GLOBAL_LOCK();
+    std::lock_guard<std::mutex> lk(_ui_mutex);
+
+    EOS_UI_EventId const event_id = _next_event_id++;
+    ui_event_t event;
+    event.kind = ui_event_kind_t::session_join;
+    event.session_infos = infos;
+    event.target_user = nullptr;
+    _ui_events[event_id] = std::move(event);
+    return event_id;
+}
+
+EOS_UI_EventId EOSSDK_UI::register_join_game_event(EOS_EpicAccountId target_user, std::string const& join_info)
+{
+    GLOBAL_LOCK();
+    std::lock_guard<std::mutex> lk(_ui_mutex);
+
+    EOS_UI_EventId const event_id = _next_event_id++;
+    ui_event_t event;
+    event.kind = ui_event_kind_t::join_game;
+    event.target_user = target_user;
+    event.join_info = join_info;
+    _ui_events[event_id] = std::move(event);
+    return event_id;
+}
+
+bool EOSSDK_UI::copy_lobby_join_event(EOS_UI_EventId event_id, Lobby_Infos_pb& out)
+{
+    std::lock_guard<std::mutex> lk(_ui_mutex);
+
+    auto it = _ui_events.find(event_id);
+    if (it == _ui_events.end() || it->second.kind != ui_event_kind_t::lobby_join)
+        return false;
+
+    out = it->second.lobby_infos;
+    return true;
+}
+
+bool EOSSDK_UI::copy_session_join_event(EOS_UI_EventId event_id, Session_Infos_pb& out)
+{
+    std::lock_guard<std::mutex> lk(_ui_mutex);
+
+    auto it = _ui_events.find(event_id);
+    if (it == _ui_events.end() || it->second.kind != ui_event_kind_t::session_join)
+        return false;
+
+    out = it->second.session_infos;
+    return true;
+}
+
+bool EOSSDK_UI::copy_join_game_event(EOS_UI_EventId event_id, EOS_EpicAccountId* target_user, std::string& join_info)
+{
+    std::lock_guard<std::mutex> lk(_ui_mutex);
+
+    auto it = _ui_events.find(event_id);
+    if (it == _ui_events.end() || it->second.kind != ui_event_kind_t::join_game)
+        return false;
+
+    if (target_user != nullptr)
+        *target_user = it->second.target_user;
+    join_info = it->second.join_info;
+    return true;
+}
+
+void EOSSDK_UI::remove_ui_event(EOS_UI_EventId event_id)
+{
+    std::lock_guard<std::mutex> lk(_ui_mutex);
+    _ui_events.erase(event_id);
+}
+
 /**
  * The UI Interface is used to access the overlay UI.  Each UI component will have a function for
  * opening it.  All UI Interface calls take a handle of type EOS_HUI as the first parameter.
@@ -62,7 +148,7 @@ void EOSSDK_UI::ShowFriends(const EOS_UI_ShowFriendsOptions* Options, void* Clie
     EOS_UI_ShowFriendsCallbackInfo& sfci = res->CreateCallback<EOS_UI_ShowFriendsCallbackInfo>((CallbackFunc)CompletionDelegate);
     sfci.ClientData = ClientData;
     sfci.LocalUserId = Options->LocalUserId;
-    sfci.ResultCode = EOS_EResult::EOS_Success;
+    sfci.ResultCode = EOS_EResult::EOS_NotConfigured;
 
     res->done = true;
     GetCB_Manager().add_callback(this, res);
@@ -91,7 +177,7 @@ void EOSSDK_UI::HideFriends(const EOS_UI_HideFriendsOptions* Options, void* Clie
     EOS_UI_HideFriendsCallbackInfo& hfci = res->CreateCallback<EOS_UI_HideFriendsCallbackInfo>((CallbackFunc)CompletionDelegate);
     hfci.ClientData = ClientData;
     hfci.LocalUserId = Options->LocalUserId;
-    hfci.ResultCode = EOS_EResult::EOS_Success;
+    hfci.ResultCode = EOS_EResult::EOS_NotConfigured;
 
     res->done = true;
     GetCB_Manager().add_callback(this, res);
@@ -173,7 +259,7 @@ EOS_EResult EOSSDK_UI::SetToggleFriendsKey(const EOS_UI_SetToggleFriendsKeyOptio
     if (Options == nullptr || !IsValidKeyCombination(Options->KeyCombination))
         return EOS_EResult::EOS_InvalidParameters;
 
-    return EOS_EResult::EOS_Success;
+    return EOS_EResult::EOS_NotConfigured;
 }
 
 /**
@@ -220,7 +306,7 @@ EOS_EResult EOSSDK_UI::SetDisplayPreference(const EOS_UI_SetDisplayPreferenceOpt
     if (Options == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
-    return EOS_EResult::EOS_InvalidParameters;
+    return EOS_EResult::EOS_NotConfigured;
 }
 
 /**
@@ -238,8 +324,13 @@ EOS_EResult EOSSDK_UI::AcknowledgeEventId(const EOS_UI_AcknowledgeEventIdOptions
 {
     TRACE_FUNC();
 
-    if (Options == nullptr)
+    if (Options == nullptr || Options->UiEventId == EOS_UI_EVENTID_INVALID)
         return EOS_EResult::EOS_InvalidParameters;
+
+    remove_ui_event(Options->UiEventId);
+    APP_LOG(Log::LogLevel::DEBUG, "AcknowledgeEventId: event=%llu result=%d",
+        static_cast<unsigned long long>(Options->UiEventId),
+        static_cast<int>(Options->Result));
 
     return EOS_EResult::EOS_Success;
 }

@@ -1,7 +1,7 @@
 #CMAKE_TOOLCHAIN_FILE
 
+cmake_minimum_required(VERSION 3.16)
 project(nemirtingas_epic_emu)
-cmake_minimum_required(VERSION 3.0)
 
 # Workaround because cross-compiling with CMake + vcpkg fucks up this variable
 # making the 'find_*' functions/macros somehow fail to find the right arch.
@@ -116,9 +116,29 @@ option(DISABLE_LOG "Disable all logging. Will reduce emu size and will speed it 
 option(USE_ZSTD_COMPRESS "Use zstd to compress network messages" OFF)
 
 set(Protobuf_USE_STATIC_LIBS ON)
-include(FindProtobuf)
+if(VCPKG_INSTALLED_DIR AND VCPKG_TARGET_TRIPLET)
+  set(Protobuf_DIR "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/protobuf" CACHE PATH "" FORCE)
+endif()
+set(protobuf_MODULE_COMPATIBLE ON)
 find_package(Protobuf CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 find_package(Threads REQUIRED)
+
+if(WIN32)
+  # Single-DLL build: protobuf/abseil must be linked statically (no libprotobuf-lite.dll / abseil_dll.dll).
+  set(VCPKG_APPLOCAL_DEPS OFF CACHE BOOL "Disable vcpkg appload of dependency DLLs" FORCE)
+  if(VCPKG_TARGET_TRIPLET MATCHES "x64-windows$")
+    message(FATAL_ERROR
+      "VCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET} links shared protobuf/abseil DLLs. "
+      "Reconfigure with -DVCPKG_TARGET_TRIPLET=x64-windows-static "
+      "(vcpkg install protobuf:x64-windows-static nlohmann-json:x64-windows-static)")
+  elseif(VCPKG_TARGET_TRIPLET MATCHES "x86-windows$")
+    message(FATAL_ERROR
+      "VCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET} links shared protobuf/abseil DLLs. "
+      "Reconfigure with -DVCPKG_TARGET_TRIPLET=x86-windows-static "
+      "(vcpkg install protobuf:x86-windows-static nlohmann-json:x86-windows-static)")
+  endif()
+endif()
 
 if(USE_ZSTD_COMPRESS)
   find_package(zstd CONFIG REQUIRED)
@@ -178,6 +198,19 @@ add_library(
   ${utils_sources}
 )
 
+if(MSVC)
+  set_property(TARGET ${EPIC_API} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  if(VCPKG_TARGET_TRIPLET MATCHES "-static")
+    foreach(_msvc_ver IN ITEMS "14.44.35207" "14.43.34808" "14.42.34433")
+      set(_msvc_lib_dir "C:/Program Files/Microsoft Visual Studio/2022/Preview/VC/Tools/MSVC/${_msvc_ver}/lib/x64")
+      if(EXISTS "${_msvc_lib_dir}/libcpmt.lib")
+        target_link_directories(${EPIC_API} PRIVATE "${_msvc_lib_dir}")
+        break()
+      endif()
+    endforeach()
+  endif()
+endif()
+
 if(UNIX)
   SET_TARGET_PROPERTIES(${EPIC_API} PROPERTIES PREFIX "")
 endif()
@@ -185,6 +218,7 @@ endif()
 target_link_libraries(
   ${EPIC_API}
   protobuf::libprotobuf-lite
+  nlohmann_json::nlohmann_json
   Threads::Threads
   $<$<BOOL:${USE_ZSTD_COMPRESS}>:libzstd>
 
@@ -195,7 +229,6 @@ target_link_libraries(
   #$<$<BOOL:${WIN32}>:winmm>
   $<$<BOOL:${WIN32}>:shell32>
   $<$<BOOL:${WIN32}>:user32>
-  $<$<BOOL:${WIN32}>:abseil_dll>
 
   # For library .so/.dylib loading
   $<$<BOOL:${UNIX}>:dl>
@@ -216,6 +249,15 @@ target_include_directories(
   extra/Socket/include
 )
 
+set(EOS_SDK_119_INCLUDE "${CMAKE_SOURCE_DIR}/../EOSEmu/EOS-SDK-49960398-Release-v1.19.0.3/SDK/Include")
+if(EXISTS "${EOS_SDK_119_INCLUDE}")
+  set_source_files_properties(
+    eos_dll/eos_missing_stubs.generated.cpp
+    eos_dll/eos_stub_overrides.cpp
+    PROPERTIES INCLUDE_DIRECTORIES "${EOS_SDK_119_INCLUDE}"
+  )
+endif()
+
 target_compile_options(
   ${EPIC_API}
   PUBLIC
@@ -227,6 +269,7 @@ target_compile_options(
   $<$<AND:$<CONFIG:>,$<BOOL:${MSVC}>>:/MP>
   $<$<AND:$<CONFIG:Debug>,$<BOOL:${MSVC}>>:/MP>
   $<$<AND:$<CONFIG:Release>,$<BOOL:${MSVC}>>:/MP>
+  $<$<BOOL:${MSVC}>:/wd4267>
 )
 
 target_compile_definitions(
@@ -235,6 +278,7 @@ target_compile_definitions(
   __EXPORT_SYMBOLS__
   EPIC_SHARED_LIBRARY
   EPIC_EXPORT
+  $<$<BOOL:${WIN32}>:UTILS_EXPORT_LIBRARY>
 
   $<$<BOOL:${USE_ZSTD_COMPRESS}>:NETWORK_COMPRESS>
   
@@ -243,6 +287,10 @@ target_compile_definitions(
   $<$<BOOL:${DISABLE_LOG}>:DISABLE_LOG>
   $<$<STREQUAL:${CMAKE_BUILD_TYPE},Release>:EMU_RELEASE_BUILD NDEBUG>
 )
+
+if(MSVC AND WIN32)
+  target_link_options(${EPIC_API} PRIVATE "/DEPENDENTLOADFLAG:0x8")
+endif()
 
 ##################
 ## Install rules

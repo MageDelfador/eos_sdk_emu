@@ -138,9 +138,15 @@ EOS_Bool EOS_ProductUserIdDetails::IsValid()
 
 EOS_EResult EOS_ProductUserIdDetails::ToString(char* outBuffer, int32_t* outBufferSize)
 {
+    if (!sdk::is_derefable_pointer(outBufferSize))
+        return EOS_EResult::EOS_InvalidParameters;
+
+    if (outBuffer != nullptr && !sdk::is_derefable_pointer(outBuffer))
+        return EOS_EResult::EOS_InvalidParameters;
+
     std::lock_guard<std::mutex> lk(_local_mutex);
 
-    if (outBuffer == nullptr || outBufferSize == nullptr)
+    if (outBuffer == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
     size_t len = _idstr.length() + 1;

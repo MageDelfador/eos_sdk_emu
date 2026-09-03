@@ -166,7 +166,7 @@ void EOSSDK_TitleStorage::QueryFileList(const EOS_TitleStorage_QueryFileListOpti
             get_metadata(file_name);
         }
 
-        qflci.FileCount = _files_cache.size();
+        qflci.FileCount = static_cast<uint32_t>(_files_cache.size());
         qflci.ResultCode = EOS_EResult::EOS_Success;
     }
 
@@ -216,7 +216,7 @@ EOS_EResult EOSSDK_TitleStorage::CopyFileMetadataByFilename(const EOS_TitleStora
             strncpy(str, it->second.md5sum.c_str(), len);
             metadata->MD5Hash = str;
         }
-        metadata->FileSizeBytes = it->second.file_size;
+        metadata->FileSizeBytes = static_cast<uint32_t>(it->second.file_size);
 
         *OutMetadata = metadata;
     }
@@ -242,7 +242,7 @@ uint32_t EOSSDK_TitleStorage::GetFileMetadataCount(const EOS_TitleStorage_GetFil
         return 0;
     }
 
-    return _files_cache.size();
+    return static_cast<uint32_t>(_files_cache.size());
 }
 
 /**
@@ -284,7 +284,7 @@ EOS_EResult EOSSDK_TitleStorage::CopyFileMetadataAtIndex(const EOS_TitleStorage_
         strncpy(str, it->second.md5sum.c_str(), len);
         metadata->MD5Hash = str;
     }
-    metadata->FileSizeBytes = it->second.file_size;
+    metadata->FileSizeBytes = static_cast<uint32_t>(it->second.file_size);
 
     *OutMetadata = metadata;
 
@@ -458,7 +458,7 @@ bool EOSSDK_TitleStorage::RunCallbacks(pFrameResult_t res)
                 }
 
                 rfdci.DataChunk = &transfert._file_buffer[0];
-                rfdci.DataChunkLengthBytes = read_len;
+                rfdci.DataChunkLengthBytes = static_cast<uint32_t>(read_len);
                 switch (transfert._read_callback(&rfdci))
                 {
                     case EOS_TitleStorage_EReadResult::EOS_TS_RR_FailRequest:

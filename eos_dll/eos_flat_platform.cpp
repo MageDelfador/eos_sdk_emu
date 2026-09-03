@@ -18,16 +18,30 @@
  */
 
 #include "eossdk_platform.h"
+#include "eos_client_api.h"
+#include "eos_api_trace.h"
+#include "os_funcs.h"
 
 using namespace sdk;
+
+namespace sdk
+{
+void dispatch_anticheat_client_tick();
+void dispatch_integrated_platform_tick();
+}
 
 /////////////////////////////////////////////////////////
 // SDK
 
 EOS_DECLARE_FUNC(void) EOS_Platform_Tick(EOS_HPlatform Handle)
 {
+    static uint32_t tick_count = 0;
+    EOS_API_TRACE_THROTTLED(tick_count, 300);
     if (Handle == nullptr)
         return;
+
+    dispatch_anticheat_client_tick();
+    dispatch_integrated_platform_tick();
 
     auto pInst = reinterpret_cast<EOSSDK_Platform*>(Handle);
     pInst->Tick();
@@ -35,6 +49,7 @@ EOS_DECLARE_FUNC(void) EOS_Platform_Tick(EOS_HPlatform Handle)
 
 EOS_DECLARE_FUNC(EOS_HMetrics) EOS_Platform_GetMetricsInterface(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return nullptr;
 
@@ -44,6 +59,7 @@ EOS_DECLARE_FUNC(EOS_HMetrics) EOS_Platform_GetMetricsInterface(EOS_HPlatform Ha
 
 EOS_DECLARE_FUNC(EOS_HAuth) EOS_Platform_GetAuthInterface(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return nullptr;
 
@@ -53,6 +69,7 @@ EOS_DECLARE_FUNC(EOS_HAuth) EOS_Platform_GetAuthInterface(EOS_HPlatform Handle)
 
 EOS_DECLARE_FUNC(EOS_HConnect) EOS_Platform_GetConnectInterface(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return nullptr;
 
@@ -62,6 +79,7 @@ EOS_DECLARE_FUNC(EOS_HConnect) EOS_Platform_GetConnectInterface(EOS_HPlatform Ha
 
 EOS_DECLARE_FUNC(EOS_HEcom) EOS_Platform_GetEcomInterface(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return nullptr;
 
@@ -71,6 +89,7 @@ EOS_DECLARE_FUNC(EOS_HEcom) EOS_Platform_GetEcomInterface(EOS_HPlatform Handle)
 
 EOS_DECLARE_FUNC(EOS_HUI) EOS_Platform_GetUIInterface(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return nullptr;
 
@@ -80,6 +99,7 @@ EOS_DECLARE_FUNC(EOS_HUI) EOS_Platform_GetUIInterface(EOS_HPlatform Handle)
 
 EOS_DECLARE_FUNC(EOS_HFriends) EOS_Platform_GetFriendsInterface(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return nullptr;
 
@@ -89,6 +109,7 @@ EOS_DECLARE_FUNC(EOS_HFriends) EOS_Platform_GetFriendsInterface(EOS_HPlatform Ha
 
 EOS_DECLARE_FUNC(EOS_HPresence) EOS_Platform_GetPresenceInterface(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return nullptr;
 
@@ -98,6 +119,7 @@ EOS_DECLARE_FUNC(EOS_HPresence) EOS_Platform_GetPresenceInterface(EOS_HPlatform 
 
 EOS_DECLARE_FUNC(EOS_HSessions) EOS_Platform_GetSessionsInterface(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return nullptr;
 
@@ -107,6 +129,7 @@ EOS_DECLARE_FUNC(EOS_HSessions) EOS_Platform_GetSessionsInterface(EOS_HPlatform 
 
 EOS_DECLARE_FUNC(EOS_HLobby) EOS_Platform_GetLobbyInterface(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return nullptr;
 
@@ -116,6 +139,7 @@ EOS_DECLARE_FUNC(EOS_HLobby) EOS_Platform_GetLobbyInterface(EOS_HPlatform Handle
 
 EOS_DECLARE_FUNC(EOS_HUserInfo) EOS_Platform_GetUserInfoInterface(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return nullptr;
 
@@ -125,6 +149,7 @@ EOS_DECLARE_FUNC(EOS_HUserInfo) EOS_Platform_GetUserInfoInterface(EOS_HPlatform 
 
 EOS_DECLARE_FUNC(EOS_HP2P) EOS_Platform_GetP2PInterface(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE_POLL(500);
     if (Handle == nullptr)
         return nullptr;
 
@@ -134,6 +159,7 @@ EOS_DECLARE_FUNC(EOS_HP2P) EOS_Platform_GetP2PInterface(EOS_HPlatform Handle)
 
 EOS_DECLARE_FUNC(EOS_HPlayerDataStorage) EOS_Platform_GetPlayerDataStorageInterface(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return nullptr;
 
@@ -143,6 +169,7 @@ EOS_DECLARE_FUNC(EOS_HPlayerDataStorage) EOS_Platform_GetPlayerDataStorageInterf
 
 EOS_DECLARE_FUNC(EOS_HTitleStorage) EOS_Platform_GetTitleStorageInterface(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return nullptr;
 
@@ -152,6 +179,7 @@ EOS_DECLARE_FUNC(EOS_HTitleStorage) EOS_Platform_GetTitleStorageInterface(EOS_HP
 
 EOS_DECLARE_FUNC(EOS_HAchievements) EOS_Platform_GetAchievementsInterface(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return nullptr;
 
@@ -161,6 +189,7 @@ EOS_DECLARE_FUNC(EOS_HAchievements) EOS_Platform_GetAchievementsInterface(EOS_HP
 
 EOS_DECLARE_FUNC(EOS_HStats) EOS_Platform_GetStatsInterface(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return nullptr;
 
@@ -170,6 +199,7 @@ EOS_DECLARE_FUNC(EOS_HStats) EOS_Platform_GetStatsInterface(EOS_HPlatform Handle
 
 EOS_DECLARE_FUNC(EOS_HLeaderboards) EOS_Platform_GetLeaderboardsInterface(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return nullptr;
 
@@ -179,6 +209,7 @@ EOS_DECLARE_FUNC(EOS_HLeaderboards) EOS_Platform_GetLeaderboardsInterface(EOS_HP
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Platform_GetActiveCountryCode(EOS_HPlatform Handle, EOS_EpicAccountId LocalUserId, char* OutBuffer, int32_t* InOutBufferLength)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -188,6 +219,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Platform_GetActiveCountryCode(EOS_HPlatform Ha
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Platform_GetActiveLocaleCode(EOS_HPlatform Handle, EOS_EpicAccountId LocalUserId, char* OutBuffer, int32_t* InOutBufferLength)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -197,6 +229,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Platform_GetActiveLocaleCode(EOS_HPlatform Han
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Platform_GetOverrideCountryCode(EOS_HPlatform Handle, char* OutBuffer, int32_t* InOutBufferLength)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -206,6 +239,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Platform_GetOverrideCountryCode(EOS_HPlatform 
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Platform_GetOverrideLocaleCode(EOS_HPlatform Handle, char* OutBuffer, int32_t* InOutBufferLength)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -215,6 +249,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Platform_GetOverrideLocaleCode(EOS_HPlatform H
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Platform_SetOverrideCountryCode(EOS_HPlatform Handle, const char* NewCountryCode)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -224,6 +259,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Platform_SetOverrideCountryCode(EOS_HPlatform 
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Platform_SetOverrideLocaleCode(EOS_HPlatform Handle, const char* NewLocaleCode)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -233,6 +269,7 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Platform_SetOverrideLocaleCode(EOS_HPlatform H
 
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Platform_CheckForLauncherAndRestart(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE();
     if (Handle == nullptr)
         return EOS_EResult::EOS_InvalidParameters;
 
@@ -254,11 +291,47 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Platform_CheckForLauncherAndRestart(EOS_HPlatf
  */
 EOS_DECLARE_FUNC(EOS_HPlatform) EOS_Platform_Create(const EOS_Platform_Options* Options)
 {
-    TRACE_FUNC();
+    try
+    {
+        EOS_API_TRACE();
+        ensure_emu_initialized();
+        TRACE_FUNC();
 
-    auto &inst = EOSSDK_Platform::Inst();
-    inst.Init(Options);
-    return reinterpret_cast<EOS_HPlatform>(&inst);
+        if (!EOSSDK_Client::Inst()._sdk_initialized)
+        {
+#if defined(__WINDOWS__)
+            OutputDebugStringA("NemirtingasEpicEmu: EOS_Platform_Create called before EOS_Initialize\n");
+#endif
+            return nullptr;
+        }
+
+        auto &inst = EOSSDK_Platform::Inst();
+        if (inst._cb_manager == nullptr || inst._network == nullptr)
+        {
+#if defined(__WINDOWS__)
+            OutputDebugStringA("NemirtingasEpicEmu: EOS_Platform_Create missing core platform services\n");
+#endif
+            return nullptr;
+        }
+
+        inst.Init(Options);
+        if (!inst.is_platform_ready())
+        {
+#if defined(__WINDOWS__)
+            OutputDebugStringA("NemirtingasEpicEmu: EOS_Platform_Create platform init incomplete\n");
+#endif
+            return nullptr;
+        }
+
+        return reinterpret_cast<EOS_HPlatform>(&inst);
+    }
+    catch (...)
+    {
+#if defined(__WINDOWS__)
+        OutputDebugStringA("NemirtingasEpicEmu: EOS_Platform_Create failed\n");
+#endif
+        return nullptr;
+    }
 }
 
 /**
@@ -270,6 +343,7 @@ EOS_DECLARE_FUNC(EOS_HPlatform) EOS_Platform_Create(const EOS_Platform_Options* 
  */
 EOS_DECLARE_FUNC(void) EOS_Platform_Release(EOS_HPlatform Handle)
 {
+    EOS_API_TRACE();
     auto pInst = reinterpret_cast<EOSSDK_Platform*>(Handle);
 
     if (pInst != &EOSSDK_Platform::Inst())

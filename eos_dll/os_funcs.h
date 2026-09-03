@@ -55,6 +55,7 @@ LOCAL_API std::chrono::microseconds get_uptime();
 // Try to disable all online networking
 LOCAL_API void disable_online_networking();
 LOCAL_API void enable_online_networking();
+LOCAL_API bool try_init_socket();
 
 // Get User env variable
 LOCAL_API std::string get_env_var(std::string const& var);
@@ -66,6 +67,7 @@ LOCAL_API std::string get_executable_path();
 LOCAL_API std::string get_module_path();
 
 LOCAL_API void* get_module_handle(std::string const& name);
+LOCAL_API std::string get_module_path_for_handle(void* module_handle);
 
 struct iface_ip_t
 {
@@ -74,4 +76,10 @@ struct iface_ip_t
 };
 LOCAL_API std::vector<iface_ip_t> const& get_ifaces_ip();
 LOCAL_API std::vector<PortableAPI::ipv4_addr> const& get_broadcasts();
+LOCAL_API std::string get_preferred_lan_ipv4();
+LOCAL_API std::string session_redpoint_eosp2p_port(std::string const& host_address);
+LOCAL_API bool session_redpoint_eosp2p_port_is_loopback(std::string const& port);
+LOCAL_API std::string normalize_session_host_address(std::string const& host_address);
+
+LOCAL_API void ensure_emu_initialized();
 

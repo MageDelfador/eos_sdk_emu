@@ -18,6 +18,11 @@
  */
 
 #include "os_funcs.h"
+#include "settings.h"
+
+#include <mutex>
+#include <algorithm>
+#include <cctype>
 
 using namespace PortableAPI;
 
@@ -26,6 +31,169 @@ static void* hmodule;
 LOCAL_API std::chrono::microseconds get_uptime()
 {
     return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now() - get_boottime());
+}
+
+namespace
+{
+bool is_loopback_ipv4(uint32_t ip)
+{
+    return (ip & 0xFF000000u) == 0x7F000000u;
+}
+
+std::string ipv4_to_string(uint32_t ip)
+{
+    PortableAPI::ipv4_addr addr;
+    addr.set_ip(ip);
+    std::string const full = addr.to_string();
+    size_t const colon = full.find(':');
+    return colon == std::string::npos ? full : full.substr(0, colon);
+}
+
+bool parse_custom_broadcast_subnet(std::string const& spec, uint32_t& network_out, uint32_t& prefix_len_out)
+{
+    network_out = 0;
+    prefix_len_out = 0;
+    if (spec.empty())
+        return false;
+
+    size_t const slash = spec.find('/');
+    PortableAPI::ipv4_addr addr;
+    if (slash == std::string::npos)
+    {
+        if (!addr.from_string(spec))
+            return false;
+        network_out = addr.get_ip() & 0xffffff00u;
+        prefix_len_out = 24;
+        return true;
+    }
+
+    if (!addr.from_string(spec.substr(0, slash)))
+        return false;
+
+    network_out = addr.get_ip();
+    try
+    {
+        prefix_len_out = static_cast<uint32_t>(std::stoul(spec.substr(slash + 1)));
+    }
+    catch (...)
+    {
+        return false;
+    }
+
+    return prefix_len_out > 0 && prefix_len_out <= 32;
+}
+
+bool ip_in_subnet(uint32_t ip, uint32_t network, uint32_t prefix_len)
+{
+    if (prefix_len == 0)
+        return true;
+
+    uint32_t const mask = prefix_len >= 32 ? 0xFFFFFFFFu : (~0u << (32 - prefix_len));
+    return (ip & mask) == (network & mask);
+}
+}
+
+LOCAL_API std::string get_preferred_lan_ipv4()
+{
+    auto const& ifaces = get_ifaces_ip();
+    if (ifaces.empty())
+        return "127.0.0.1";
+
+    uint32_t preferred_network = 0;
+    uint32_t preferred_prefix = 0;
+    bool const has_preferred_subnet = parse_custom_broadcast_subnet(Settings::Inst().custom_broadcast, preferred_network, preferred_prefix);
+
+    if (has_preferred_subnet)
+    {
+        for (auto const& iface : ifaces)
+        {
+            if (is_loopback_ipv4(iface.ip))
+                continue;
+
+            if (ip_in_subnet(iface.ip, preferred_network, preferred_prefix))
+                return ipv4_to_string(iface.ip);
+        }
+    }
+
+    for (auto const& iface : ifaces)
+    {
+        if (!is_loopback_ipv4(iface.ip))
+            return ipv4_to_string(iface.ip);
+    }
+
+    return ipv4_to_string(ifaces.front().ip);
+}
+
+LOCAL_API std::string session_redpoint_eosp2p_port(std::string const& host_address)
+{
+    size_t const eosp2p = host_address.rfind(".eosp2p:");
+    if (eosp2p == std::string::npos)
+        return {};
+
+    std::string port = host_address.substr(eosp2p + 8);
+    if (!port.empty() && port.front() == ':')
+        port.erase(0, 1);
+
+    if (port.find('.') != std::string::npos)
+        return {};
+
+    return port;
+}
+
+LOCAL_API bool session_redpoint_eosp2p_port_is_loopback(std::string const& port)
+{
+    return port == "127" || port.rfind("127.", 0) == 0;
+}
+
+LOCAL_API std::string normalize_session_host_address(std::string const& host_address)
+{
+    auto const is_unusable = [](std::string const& host) -> bool
+    {
+        if (host.empty())
+            return true;
+
+        std::string lower = host;
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (lower.find("127.0.0.1") != std::string::npos ||
+            lower.find("localhost") != std::string::npos ||
+            lower == "0.0.0.0" ||
+            lower.rfind("eosp2p:127", 0) == 0)
+            return true;
+
+        std::string const port = session_redpoint_eosp2p_port(lower);
+        return session_redpoint_eosp2p_port_is_loopback(port);
+    };
+
+    std::string const lan_ip = get_preferred_lan_ipv4();
+    if (!is_unusable(host_address))
+        return host_address;
+
+    if (host_address.rfind("eosp2p:", 0) == 0)
+    {
+        std::string const rest = host_address.substr(7);
+        size_t const colon = rest.find(':');
+        if (colon != std::string::npos)
+            return "eosp2p:" + lan_ip + rest.substr(colon);
+
+        return "eosp2p:" + lan_ip;
+    }
+
+    size_t const eosp2p = host_address.rfind(".eosp2p:");
+    if (eosp2p != std::string::npos && eosp2p >= 32)
+    {
+        std::string const port = session_redpoint_eosp2p_port(host_address);
+        if (session_redpoint_eosp2p_port_is_loopback(port))
+        {
+            std::string const owner = host_address.substr(0, 32);
+            if (Settings::Inst().productuserid != nullptr &&
+                owner == Settings::Inst().productuserid->to_string())
+                return host_address.substr(0, eosp2p) + ".eosp2p:" + lan_ip;
+
+            return host_address;
+        }
+    }
+
+    return lan_ip;
 }
 
 LOCAL_API std::vector<ipv4_addr> const& get_broadcasts()
@@ -207,14 +375,44 @@ HINTERNET WINAPI MyWinHttpOpenRequest(
     return _WinHttpOpenRequest(hConnect, pwszVerb, pwszObjectName, pwszVersion, pwszReferrer, ppwszAcceptTypes, dwFlags);
 }
 
+void ensure_emu_initialized()
+{
+    static std::once_flag once;
+    std::call_once(once, []() {
+        try
+        {
+            Settings::Inst();
+            try_init_socket();
+        }
+        catch (...)
+        {
+            OutputDebugStringA("NemirtingasEpicEmu: ensure_emu_initialized failed\n");
+        }
+    });
+}
+
+LOCAL_API bool try_init_socket()
+{
+    static std::once_flag once;
+    static bool ok = false;
+    std::call_once(once, []() {
+        try
+        {
+            Socket::InitSocket();
+            ok = true;
+        }
+        catch (...)
+        {
+            ok = false;
+        }
+    });
+    return ok;
+}
+
 void shared_library_load(void* hmodule)
 {
     ::hmodule = hmodule;
-
-    std::fstream log("cmdline.txt", std::ios::out | std::ios::trunc);
-    log << GetCommandLine();
-
-    Socket::InitSocket();
+    DisableThreadLibraryCalls((HINSTANCE)hmodule);
 }
 
 void shared_library_unload(void* hmodule)
@@ -276,14 +474,14 @@ LOCAL_API std::string get_env_var(std::string const& var)
 
 LOCAL_API std::string get_userdata_path()
 {
+    WCHAR szPath[MAX_PATH] = {};
+
+    HRESULT hr = SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, szPath);
+    if (!SUCCEEDED(hr))
+        return std::string();
+
     std::string user_appdata_path;
-    CHAR szPath[MAX_PATH] = {};
-
-    HRESULT hr = SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, szPath);
-
-    if (SUCCEEDED(hr))
-        user_appdata_path = szPath;
-
+    utf8::utf16to8(szPath, szPath + wcslen(szPath), std::back_inserter(user_appdata_path));
     return user_appdata_path;
 }
 
@@ -292,10 +490,9 @@ LOCAL_API std::string get_executable_path()
     std::string path;
     std::wstring wpath(4096, '\0');
 
-    DWORD size = GetModuleFileNameW(nullptr, &wpath[0], wpath.length());
+    DWORD size = GetModuleFileNameW(nullptr, &wpath[0], static_cast<DWORD>(wpath.length()));
     utf8::utf16to8(wpath.begin(), wpath.begin() + size, std::back_inserter(path));
 
-    APP_LOG(Log::LogLevel::INFO, "%s", path.c_str());
     return path;
 }
 
@@ -304,10 +501,9 @@ LOCAL_API std::string get_module_path()
     std::string path;
     std::wstring wpath(4096, '\0');
 
-    DWORD size = GetModuleFileNameW((HINSTANCE)hmodule, &wpath[0], wpath.length());
+    DWORD size = GetModuleFileNameW((HINSTANCE)hmodule, &wpath[0], static_cast<DWORD>(wpath.length()));
     utf8::utf16to8(wpath.begin(), wpath.begin() + size, std::back_inserter(path));
 
-    APP_LOG(Log::LogLevel::INFO, "%s", path.c_str());
     return path;
 }
 
@@ -317,6 +513,27 @@ LOCAL_API void* get_module_handle(std::string const& name)
     utf8::utf8to16(name.begin(), name.end(), std::back_inserter(wname));
 
     return GetModuleHandleW(wname.c_str());
+}
+
+LOCAL_API std::string get_module_path_for_handle(void* module_handle)
+{
+    if (module_handle == nullptr)
+        return std::string();
+
+#if defined(__WINDOWS__)
+    std::string path;
+    std::wstring wpath(4096, L'\0');
+
+    DWORD const size = GetModuleFileNameW(static_cast<HMODULE>(module_handle), wpath.data(), static_cast<DWORD>(wpath.size()));
+    if (size == 0 || size >= wpath.size())
+        return std::string();
+
+    utf8::utf16to8(wpath.begin(), wpath.begin() + size, std::back_inserter(path));
+    return path;
+#else
+    (void)module_handle;
+    return std::string();
+#endif
 }
 
 LOCAL_API std::vector<iface_ip_t> const& get_ifaces_ip()
@@ -464,7 +681,6 @@ LOCAL_API std::string get_executable_path()
     closedir(dir);
     dlclose(hexecutable);
 
-    APP_LOG(Log::LogLevel::INFO, "%s", exec_path.c_str());
     return exec_path;
 }
 
@@ -508,6 +724,18 @@ LOCAL_API void* get_module_handle(std::string const& name)
     }
 
     return res;
+}
+
+LOCAL_API std::string get_module_path_for_handle(void* module_handle)
+{
+    if (module_handle == nullptr)
+        return std::string();
+
+    Dl_info infos;
+    if (dladdr(module_handle, &infos) == 0 || infos.dli_fname == nullptr)
+        return std::string();
+
+    return std::string(infos.dli_fname);
 }
 
 LOCAL_API std::string get_userdata_path()
@@ -613,6 +841,18 @@ LOCAL_API void* get_module_handle(std::string const& name)
     return res;
 }
 
+LOCAL_API std::string get_module_path_for_handle(void* module_handle)
+{
+    if (module_handle == nullptr)
+        return std::string();
+
+    Dl_info infos;
+    if (dladdr(module_handle, &infos) == 0 || infos.dli_fname == nullptr)
+        return std::string();
+
+    return std::string(infos.dli_fname);
+}
+
 LOCAL_API std::string get_userdata_path()
 {
     std::string user_appdata_path;
@@ -650,9 +890,44 @@ static int Myconnect(int s, const sockaddr* addr, int namelen)
     }
 }
 
+void ensure_emu_initialized()
+{
+    static std::once_flag once;
+    std::call_once(once, []() {
+        try
+        {
+            Settings::Inst();
+            try_init_socket();
+        }
+        catch (...)
+        {
+            OutputDebugStringA("NemirtingasEpicEmu: ensure_emu_initialized failed\n");
+        }
+    });
+}
+
+LOCAL_API bool try_init_socket()
+{
+    static std::once_flag once;
+    static bool ok = false;
+    std::call_once(once, []() {
+        try
+        {
+            Socket::InitSocket();
+            ok = true;
+        }
+        catch (...)
+        {
+            ok = false;
+        }
+    });
+    return ok;
+}
+
 void shared_library_load(void* hmodule)
 {
     ::hmodule = hmodule;
+    ensure_emu_initialized();
 }
 
 void shared_library_unload(void* hmodule)
@@ -692,7 +967,6 @@ LOCAL_API std::string get_module_path()
     dladdr(hmodule, &infos);
     library_path = infos.dli_fname;
 
-    APP_LOG(Log::LogLevel::INFO, "%s", library_path.c_str());
     return library_path;
 }
 

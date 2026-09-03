@@ -51,7 +51,7 @@ FrameResult::~FrameResult()
 
 void* FrameResult::AllocCallback(CallbackObj func, size_t func_param_size, int i_callback, std::chrono::milliseconds ok_timeout)
 {
-    uint8_t* buff = new uint8_t[func_param_size];
+    uint8_t* buff = new uint8_t[func_param_size]();
     SetCallback(func, buff, func_param_size, i_callback, ok_timeout);
     return buff;
 }

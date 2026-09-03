@@ -39,7 +39,6 @@ OFF  : no logs     , saves cpu usage when running the debug versions
     - On MacOS, saves will go in $HOME/NemirtingasEpicEmu
   2. { "savepath": "something" }: (savepath can be empty like { "savepath": "" }), saves will go in the directory specified by savepath, relative to the game's working directory. In the example, it could be "game dir"\something\NemirtingasEpicEmu or "game dir"\NemirtingasEpicEmu.
 - { "disable_online_networking": true|false }: it will try to disable all **online** networking, not lan or vpn. This prevents games to go on the internet. If your game crash and you've set this to true, try to set it to false. I use my own solution to override the classic network functions, it can be buggy.
-- { "enable_overlay": true|false}: For **for future use**, it will allow you to have an overlay like the EOS social overlay, invite people to games and receive notifications like achievements unlocked.
 - { "gamename": "DefaultGameName" }: If the gamename is "DefaultGameName" or missing, the emulator will replace it with what the game provides it.
 - { "unlock_dlcs": true|false }: This will try to enable all dlcs/items that the game requests. If the game wants more infos on em it might not work. (Like unlock_all_dlcs on a steam emu, some need you to provide the appid = name).
 - { "log_level": "OFF|FATAL|ERR|WARN|INFO|DEBUG|TRACE" }: Decides how verbose the emulator will be, for debugging purpose. Defaults to OFF
@@ -50,11 +49,16 @@ OFF  : no logs     , saves cpu usage when running the debug versions
 - Install Visual Studio 17 2022. You want C/C++ app support.
 - Install pwsh. Open powershell and run: winget install --id Microsoft.PowerShell --source winget
 - Install vcpkg: https://learn.microsoft.com/en-us/vcpkg/get_started/get-started?pivots=shell-powershell . Follow the bootstrap instructions.
-	- Run "vcpkg install protobuf", "vcpkg install nlohmann-json"
+	- Run `vcpkg install protobuf:x64-windows-static nlohmann-json:x64-windows-static`
 - Install cmake for windows. Open cmake-gui and point it to the source code. Create a separate build folder if you want and point it to that.
 	- Hit configure.  Choose "Specify Toolchain file for cross-compiling". Choose ..\vcpkg\scripts\buildsystems\vcpkg.cmake
+	- Set `VCPKG_TARGET_TRIPLET` to **`x64-windows-static`** (single DLL; no extra `libprotobuf-lite.dll` / `abseil_dll.dll`)
 	- Hit "Add Entry" Add "X64" as a string set to "ON".
 	- Hit Configure, then Generate. Then hit Open Project
+
+Or from **x64 Native Tools** prompt: `tools\build_static_single_dll.bat`
+
+Deploy for Unity: only `EOSSDK-Win64-Shipping.dll` (`tools\deploy_unity.ps1`).
 
  ## 32bit
 -Same initial steps

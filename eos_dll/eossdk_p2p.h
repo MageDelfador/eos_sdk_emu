@@ -57,6 +57,7 @@ namespace sdk
 
         int32_t next_requested_channel;
         std::unordered_map<uint8_t, std::list<P2P_Data_Message_pb>> _p2p_in_messages;
+        std::deque<P2P_Data_Message_pb> _p2p_in_messages_fifo;
         std::unordered_map<EOS_ProductUserId, p2p_state_t> _p2p_connections;
 
         EOS_ERelayControl _relay_control;
@@ -68,6 +69,7 @@ namespace sdk
         ~EOSSDK_P2P();
 
         void set_p2p_state_connected(EOS_ProductUserId remote_id, p2p_state_t& state);
+        void ensure_peer_connection(std::string const& peer_id, std::string const& socket_name = {});
 
         // Send Network messages
         bool send_p2p_connection_request(Network::peer_t const& peerid, P2P_Connect_Request_pb *req) const;
@@ -110,5 +112,6 @@ namespace sdk
         EOS_EResult        GetRelayControl(const EOS_P2P_GetRelayControlOptions* Options, EOS_ERelayControl* OutRelayControl);
         EOS_EResult        SetPortRange(const EOS_P2P_SetPortRangeOptions* Options);
         EOS_EResult        GetPortRange(const EOS_P2P_GetPortRangeOptions* Options, uint16_t* OutPort, uint16_t* OutNumAdditionalPortsToTry);
+        uint16_t           p2p_port() const { return _p2p_port; }
     };
 }

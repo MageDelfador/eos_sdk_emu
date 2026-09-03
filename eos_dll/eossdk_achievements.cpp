@@ -155,7 +155,7 @@ EOS_EResult EOSSDK_Achievements::copy_definition(typename decltype(_achievements
     try
     {
         auto& stats_thresholds = it.value()["stats_thresholds"];
-        ach->StatThresholdsCount = stats_thresholds.size();
+        ach->StatThresholdsCount = static_cast<int32_t>(stats_thresholds.size());
         EOS_Achievements_StatThresholds* stats = new EOS_Achievements_StatThresholds[ach->StatThresholdsCount];
         memset(stats, 0, sizeof(*stats) * ach->StatThresholdsCount);
         int i = 0;
@@ -289,7 +289,7 @@ EOS_EResult EOSSDK_Achievements::copy_definition_v2(typename decltype(_achieveme
     try
     {
         auto& stats_thresholds = it.value()["stats_thresholds"];
-        ach->StatThresholdsCount = stats_thresholds.size();
+        ach->StatThresholdsCount = static_cast<int32_t>(stats_thresholds.size());
         EOS_Achievements_StatThresholds* stats = new EOS_Achievements_StatThresholds[ach->StatThresholdsCount];
         memset(stats, 0, sizeof(*stats) * ach->StatThresholdsCount);
         int i = 0;
@@ -440,7 +440,7 @@ EOS_EResult EOSSDK_Achievements::copy_player_achievement(typename decltype(_achi
     try
     {
         auto& stat_info = it.value()["stat_info"];
-        ach->StatInfoCount = stat_info.size();
+        ach->StatInfoCount = static_cast<int32_t>(stat_info.size());
         EOS_Achievements_PlayerStatInfo* stats = new EOS_Achievements_PlayerStatInfo[ach->StatInfoCount];
         memset(stats, 0, sizeof(*stats) * ach->StatInfoCount);
         int i = 0;
@@ -549,7 +549,7 @@ uint32_t EOSSDK_Achievements::GetAchievementDefinitionCount(const EOS_Achievemen
 {
     TRACE_FUNC();
 
-    return _achievements_db.size();
+    return static_cast<uint32_t>(_achievements_db.size());
 }
 
 /**
@@ -693,7 +693,7 @@ uint32_t EOSSDK_Achievements::GetPlayerAchievementCount(const EOS_Achievements_G
     if (Options == nullptr || Options->UserId == nullptr || Options->UserId != GetEOS_Connect().get_myself()->first)
         return 0;
 
-    return _achievements.size();
+    return static_cast<uint32_t>(_achievements.size());
 }
 
 /**
@@ -838,7 +838,7 @@ void EOSSDK_Achievements::UnlockAchievements(const EOS_Achievements_UnlockAchiev
     }
     else
     {
-        for (int i = 0; i < Options->AchievementsCount; ++i)
+        for (uint32_t i = 0; i < Options->AchievementsCount; ++i)
         {
             if (_achievements_db.find(Options->AchievementIds[i]) != _achievements_db.end())
             {
@@ -887,7 +887,7 @@ uint32_t EOSSDK_Achievements::GetUnlockedAchievementCount(const EOS_Achievements
         {}
     }
     
-    return _unlocked_achievements.size();
+    return static_cast<uint32_t>(_unlocked_achievements.size());
 }
 
 /**

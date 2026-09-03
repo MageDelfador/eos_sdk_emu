@@ -90,7 +90,7 @@ void EOSSDK_Stats::IngestStat(const EOS_Stats_IngestStatOptions* Options, void* 
         }
         else
         {
-            for (int i = 0; i < Options->StatsCount; ++i)
+            for (uint32_t i = 0; i < Options->StatsCount; ++i)
             {
                 auto& stat = Options->Stats[i];
                 _stats[stat.StatName] += stat.IngestAmount;
@@ -156,7 +156,7 @@ uint32_t EOSSDK_Stats::GetStatsCount(const EOS_Stats_GetStatCountOptions* Option
     if (Options == nullptr)
         return 0;
 
-    return _stats.size();
+    return static_cast<uint32_t>(_stats.size());
 }
 
 /**

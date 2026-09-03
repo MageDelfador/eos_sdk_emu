@@ -24,9 +24,29 @@
 
 namespace sdk
 {
+    enum class ui_event_kind_t
+    {
+        lobby_join,
+        session_join,
+        join_game,
+    };
+
+    struct ui_event_t
+    {
+        ui_event_kind_t kind;
+        Lobby_Infos_pb  lobby_infos;
+        Session_Infos_pb session_infos;
+        EOS_EpicAccountId target_user;
+        std::string     join_info;
+    };
+
     class EOSSDK_UI :
         public IRunCallback
     {
+        std::mutex _ui_mutex;
+        std::atomic<EOS_UI_EventId> _next_event_id{1};
+        std::unordered_map<EOS_UI_EventId, ui_event_t> _ui_events;
+
     public:
         EOSSDK_UI();
         ~EOSSDK_UI();
@@ -34,6 +54,14 @@ namespace sdk
         virtual bool CBRunFrame();
         virtual bool RunCallbacks(pFrameResult_t res);
         virtual void FreeCallback(pFrameResult_t res);
+
+        EOS_UI_EventId register_lobby_join_event(Lobby_Infos_pb const& infos);
+        EOS_UI_EventId register_session_join_event(Session_Infos_pb const& infos);
+        EOS_UI_EventId register_join_game_event(EOS_EpicAccountId target_user, std::string const& join_info);
+        bool           copy_lobby_join_event(EOS_UI_EventId event_id, Lobby_Infos_pb& out);
+        bool           copy_session_join_event(EOS_UI_EventId event_id, Session_Infos_pb& out);
+        bool           copy_join_game_event(EOS_UI_EventId event_id, EOS_EpicAccountId* target_user, std::string& join_info);
+        void           remove_ui_event(EOS_UI_EventId event_id);
 
         void                         ShowFriends(const EOS_UI_ShowFriendsOptions* Options, void* ClientData, const EOS_UI_OnShowFriendsCallback CompletionDelegate);
         void                         HideFriends(const EOS_UI_HideFriendsOptions* Options, void* ClientData, const EOS_UI_OnHideFriendsCallback CompletionDelegate);
