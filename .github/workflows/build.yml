@@ -32,38 +32,6 @@ jobs:
           VCPKG_TARGET_TRIPLET: ${{ matrix.arch }}-windows-static
           VCPKG_BINARY_SOURCES: 'clear'
 
-      - name: Patch eos_p2p.h to replace EOS_P2P_PacketQueueInfo with void
-        shell: pwsh
-        run: |
-          $file = "extra/eos_sdk/eos_p2p.h"
-          $content = Get-Content $file -Raw
-          $content = $content -replace 'EOS_P2P_PacketQueueInfo\s*\*', 'void*'
-          Set-Content $file -Value $content
-          Write-Host "Patched eos_p2p.h"
-
-      - name: Patch EOS SDK missing types
-        shell: pwsh
-        run: |
-          $header = "extra/eos_sdk/eos_rtc_audio.h"
-          if (Test-Path $header) {
-            $content = Get-Content $header -Raw
-            if ($content -notmatch 'EOS_RTCAudio_RegisterPlatformUserOptions') {
-              $typeDef = @"
-          EOS_STRUCT(EOS_RTCAudio_RegisterPlatformUserOptions, (
-              int32_t ApiVersion;
-              const char* PlatformUserId;
-          ));
-          
-          "@
-              Add-Content -Path $header -Value "`n$typeDef"
-              Write-Host "Added EOS_RTCAudio_RegisterPlatformUserOptions definition to eos_rtc_audio.h"
-            } else {
-              Write-Host "EOS_RTCAudio_RegisterPlatformUserOptions already defined"
-            }
-          } else {
-            Write-Host "eos_rtc_audio.h not found, skipping patch"
-          }
-
       - name: Regenerate EOS stubs
         shell: pwsh
         run: |
