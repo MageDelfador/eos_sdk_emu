@@ -44,25 +44,12 @@ jobs:
         run: |
           $installedDir = "D:\vcpkg\installed\x64-windows-static"
           if (Test-Path $installedDir) {
-            Write-Host "Removing old installed directory: $installedDir"
             Remove-Item -Recurse -Force $installedDir
           }
           vcpkg install protobuf:x64-windows-static nlohmann-json:x64-windows-static --recurse --binarysource=clear
-          Write-Host "Installed packages:"
           vcpkg list
 
-      - name: Debug vcpkg installation
-        shell: pwsh
-        run: |
-          Write-Host "VCPKG_ROOT = $env:VCPKG_ROOT"
-          Write-Host "Listing D:\vcpkg\installed\x64-windows-static\share:"
-          if (Test-Path "D:\vcpkg\installed\x64-windows-static\share") {
-            Get-ChildItem "D:\vcpkg\installed\x64-windows-static\share" | Select-Object Name
-          } else {
-            Write-Host "share directory not found!"
-          }
-
-      - name: Configure CMake (Ninja)
+      - name: Configure CMake
         shell: pwsh
         run: |
           $buildDir = "$env:GITHUB_WORKSPACE\build"
@@ -88,18 +75,18 @@ jobs:
       - name: Verify DLL imports
         shell: pwsh
         run: |
-          $dllPath = "$env:GITHUB_WORKSPACE\build\bin\Release\EOSSDK-Win64-Shipping.dll"
-          if (Test-Path $dllPath) {
-            python -c "import pefile; pe=pefile.PE(r'$dllPath'); deps=[e.dll.decode() for e in pe.DIRECTORY_ENTRY_IMPORT]; print('IMPORTS:', ', '.join(sorted(deps)))"
-          } else {
-            Write-Error "DLL not found at $dllPath"
+          $dll = Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Recurse -Filter "EOSSDK-Win64-Shipping.dll" | Select-Object -First 1
+          if (-not $dll) {
+            Write-Error "EOSSDK-Win64-Shipping.dll not found anywhere in workspace!"
             exit 1
           }
+          Write-Host "Found DLL at: $($dll.FullName)"
+          python -c "import pefile; pe=pefile.PE(r'$($dll.FullName)'); deps=[e.dll.decode() for e in pe.DIRECTORY_ENTRY_IMPORT]; print('IMPORTS:', ', '.join(sorted(deps)))"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: EOSSDK-Win64-Shipping
           path: |
-            build/bin/Release/EOSSDK-Win64-Shipping.dll
-            build/**/*.dll
+            **/EOSSDK-Win64-Shipping.dll
+            **/*.dll
