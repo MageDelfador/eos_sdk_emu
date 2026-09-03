@@ -5,7 +5,6 @@
   "dependencies": [
     "protobuf",
     "nlohmann-json",
-    "abseil"
   ],
   "overrides": [
     {
