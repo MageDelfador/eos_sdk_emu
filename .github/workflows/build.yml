@@ -38,20 +38,21 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.VCPKG_ROOT }}/installed
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', '**/vcpkg.json') }}
+          key: ${{ runner.os }}-vcpkg-static-${{ hashFiles('vcpkg.json', '**/vcpkg.json') }}
           restore-keys: |
-            ${{ runner.os }}-vcpkg-
+            ${{ runner.os }}-vcpkg-static-
 
       - name: Setup MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
-      - name: Install protobuf static (editable)
+      - name: Install protobuf static
         shell: pwsh
         run: |
-          vcpkg remove abseil:x64-windows-static utf8-range:x64-windows-static protobuf:x64-windows-static --recurse
-          vcpkg install protobuf:x64-windows-static --editable --recurse --binarysource=clear
+          vcpkg remove protobuf:x64-windows-static --recurse
+          vcpkg install protobuf:x64-windows-static
+          vcpkg list
 
       - name: Configure CMake
         shell: pwsh
@@ -69,7 +70,8 @@ jobs:
                 -DX64=ON `
                 -DCMAKE_BUILD_TYPE=Release `
                 "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
-                "-DVCPKG_TARGET_TRIPLET=x64-windows-static"
+                "-DVCPKG_TARGET_TRIPLET=x64-windows-static" `
+                "-DCMAKE_PREFIX_PATH=$env:VCPKG_ROOT/installed/x64-windows-static"
 
       - name: Build
         shell: pwsh
