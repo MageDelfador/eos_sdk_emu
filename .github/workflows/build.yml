@@ -32,18 +32,14 @@ jobs:
           VCPKG_TARGET_TRIPLET: ${{ matrix.arch }}-windows-static
           VCPKG_BINARY_SOURCES: 'clear'
 
-      - name: Patch generated stubs to include eos_p2p_types.h
+      - name: Patch eos_p2p.h to replace EOS_P2P_PacketQueueInfo with void
         shell: pwsh
         run: |
-          $stub = "eos_dll/eos_missing_stubs.generated.cpp"
-          $content = Get-Content $stub -Raw
-          if ($content -notmatch '#include "eos_p2p_types.h"') {
-            $content = $content -replace '#include "eos_sdk.h"', "#include `"eos_sdk.h`"`n#include `"eos_p2p_types.h`""
-            Set-Content $stub -Value $content
-            Write-Host "Added explicit include of eos_p2p_types.h"
-          } else {
-            Write-Host "eos_p2p_types.h already included"
-          }
+          $file = "extra/eos_sdk/eos_p2p.h"
+          $content = Get-Content $file -Raw
+          $content = $content -replace 'EOS_P2P_PacketQueueInfo\s*\*', 'void*'
+          Set-Content $file -Value $content
+          Write-Host "Patched eos_p2p.h"
 
       - name: Patch EOS SDK missing types
         shell: pwsh
