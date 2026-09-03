@@ -17,11 +17,8 @@
  *
  * @param Options Required fields for the creation of a session such as a name, bucketid, and max players
  * @param OutSessionModificationHandle Pointer to a Session Modification Handle only set if successful
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if we successfully created the Session Modification Handle pointed at in OutSessionModificationHandle, or an error result if the input data was invalid
+ * @return EOS_Success if we successfully created the Session Modification Handle pointed at in OutSessionModificationHandle, or an error result if the input data was invalid
  *
- * @see EOS_Sessions_CreateSessionModificationOptions
  * @see EOS_SessionModification_Release
  * @see EOS_Sessions_UpdateSession
  * @see EOS_HSessionModification
@@ -34,11 +31,8 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Sessions_CreateSessionModification(EOS_HSessio
  *
  * @param Options Required fields such as session name
  * @param OutSessionModificationHandle Pointer to a Session Modification Handle only set if successful
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if we successfully created the Session Modification Handle pointed at in OutSessionModificationHandle, or an error result if the input data was invalid
+ * @return EOS_Success if we successfully created the Session Modification Handle pointed at in OutSessionModificationHandle, or an error result if the input data was invalid
  *
- * @see EOS_Sessions_UpdateSessionModificationOptions
  * @see EOS_SessionModification_Release
  * @see EOS_Sessions_UpdateSession
  * @see EOS_HSessionModification
@@ -52,8 +46,10 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Sessions_UpdateSessionModification(EOS_HSessio
  * @param ClientData Arbitrary data that is passed back to you in the CompletionDelegate
  * @param CompletionDelegate A callback that is fired when the update operation completes, either successfully or in error
  *
- * @see EOS_Sessions_UpdateSessionOptions
- * @see EOS_Sessions_OnUpdateSessionCallback
+ * @return EOS_Success if the update completes successfully
+ *         EOS_InvalidParameters if any of the options are incorrect
+ *         EOS_Sessions_OutOfSync if the session is out of sync and will be updated on the next connection with the backend
+ *         EOS_NotFound if a session to be updated does not exist
  */
 EOS_DECLARE_FUNC(void) EOS_Sessions_UpdateSession(EOS_HSessions Handle, const EOS_Sessions_UpdateSessionOptions* Options, void* ClientData, const EOS_Sessions_OnUpdateSessionCallback CompletionDelegate);
 
@@ -64,8 +60,10 @@ EOS_DECLARE_FUNC(void) EOS_Sessions_UpdateSession(EOS_HSessions Handle, const EO
  * @param ClientData Arbitrary data that is passed back to you in the CompletionDelegate
  * @param CompletionDelegate A callback that is fired when the destroy operation completes, either successfully or in error
  *
- * @see EOS_Sessions_DestroySessionOptions
- * @see EOS_Sessions_OnDestroySessionCallback
+ * @return EOS_Success if the destroy completes successfully
+ *         EOS_InvalidParameters if any of the options are incorrect
+ *         EOS_AlreadyPending if the session is already marked for destroy
+ *         EOS_NotFound if a session to be destroyed does not exist
  */
 EOS_DECLARE_FUNC(void) EOS_Sessions_DestroySession(EOS_HSessions Handle, const EOS_Sessions_DestroySessionOptions* Options, void* ClientData, const EOS_Sessions_OnDestroySessionCallback CompletionDelegate);
 
@@ -76,8 +74,9 @@ EOS_DECLARE_FUNC(void) EOS_Sessions_DestroySession(EOS_HSessions Handle, const E
  * @param ClientData Arbitrary data that is passed back to you in the CompletionDelegate
  * @param CompletionDelegate A callback that is fired when the join operation completes, either successfully or in error
  *
- * @see EOS_Sessions_JoinSessionOptions
- * @see EOS_Sessions_OnJoinSessionCallback
+ * @return EOS_Success if the join completes successfully
+ *         EOS_InvalidParameters if any of the options are incorrect
+ *         EOS_Sessions_SessionAlreadyExists if the session is already exists or is in the process of being joined
  */
 EOS_DECLARE_FUNC(void) EOS_Sessions_JoinSession(EOS_HSessions Handle, const EOS_Sessions_JoinSessionOptions* Options, void* ClientData, const EOS_Sessions_OnJoinSessionCallback CompletionDelegate);
 
@@ -88,8 +87,10 @@ EOS_DECLARE_FUNC(void) EOS_Sessions_JoinSession(EOS_HSessions Handle, const EOS_
  * @param ClientData Arbitrary data that is passed back to you in the CompletionDelegate
  * @param CompletionDelegate A callback that is fired when the start operation completes, either successfully or in error
  *
- * @see EOS_Sessions_StartSessionOptions
- * @see EOS_Sessions_OnStartSessionCallback
+ * @return EOS_Success if the start completes successfully
+ *         EOS_InvalidParameters if any of the options are incorrect
+ *         EOS_Sessions_OutOfSync if the session is out of sync and will be updated on the next connection with the backend
+ *         EOS_NotFound if a session to be started does not exist
  */
 EOS_DECLARE_FUNC(void) EOS_Sessions_StartSession(EOS_HSessions Handle, const EOS_Sessions_StartSessionOptions* Options, void* ClientData, const EOS_Sessions_OnStartSessionCallback CompletionDelegate);
 
@@ -100,8 +101,10 @@ EOS_DECLARE_FUNC(void) EOS_Sessions_StartSession(EOS_HSessions Handle, const EOS
  * @param ClientData Arbitrary data that is passed back to you in the CompletionDelegate
  * @param CompletionDelegate A callback that is fired when the end operation completes, either successfully or in error
  *
- * @see EOS_Sessions_EndSessionOptions
- * @see EOS_Sessions_OnEndSessionCallback
+ * @return EOS_Success if the end completes successfully
+ *         EOS_InvalidParameters if any of the options are incorrect
+ *         EOS_Sessions_OutOfSync if the session is out of sync and will be updated on the next connection with the backend
+ *         EOS_NotFound if a session to be ended does not exist
  */
 EOS_DECLARE_FUNC(void) EOS_Sessions_EndSession(EOS_HSessions Handle, const EOS_Sessions_EndSessionOptions* Options, void* ClientData, const EOS_Sessions_OnEndSessionCallback CompletionDelegate);
 
@@ -112,8 +115,11 @@ EOS_DECLARE_FUNC(void) EOS_Sessions_EndSession(EOS_HSessions Handle, const EOS_S
  * @param ClientData Arbitrary data that is passed back to you in the CompletionDelegate
  * @param CompletionDelegate A callback that is fired when the registration operation completes, either successfully or in error
  *
- * @see EOS_Sessions_RegisterPlayersOptions
- * @see EOS_Sessions_OnRegisterPlayersCallback
+ * @return EOS_Success if the register completes successfully
+ *         EOS_NoChange if the players to register registered previously
+ *         EOS_InvalidParameters if any of the options are incorrect
+ *         EOS_Sessions_OutOfSync if the session is out of sync and will be updated on the next connection with the backend
+ *         EOS_NotFound if a session to register players does not exist
  */
 EOS_DECLARE_FUNC(void) EOS_Sessions_RegisterPlayers(EOS_HSessions Handle, const EOS_Sessions_RegisterPlayersOptions* Options, void* ClientData, const EOS_Sessions_OnRegisterPlayersCallback CompletionDelegate);
 
@@ -124,8 +130,11 @@ EOS_DECLARE_FUNC(void) EOS_Sessions_RegisterPlayers(EOS_HSessions Handle, const 
  * @param ClientData Arbitrary data that is passed back to you in the CompletionDelegate
  * @param CompletionDelegate A callback that is fired when the unregistration operation completes, either successfully or in error
  *
- * @see EOS_Sessions_UnregisterPlayersOptions
- * @see EOS_Sessions_OnUnregisterPlayersCallback
+ * @return EOS_Success if the unregister completes successfully
+ *         EOS_NoChange if the players to unregister were not found
+ *         EOS_InvalidParameters if any of the options are incorrect
+ *         EOS_Sessions_OutOfSync if the session is out of sync and will be updated on the next connection with the backend
+ *         EOS_NotFound if a session to be unregister players does not exist
  */
 EOS_DECLARE_FUNC(void) EOS_Sessions_UnregisterPlayers(EOS_HSessions Handle, const EOS_Sessions_UnregisterPlayersOptions* Options, void* ClientData, const EOS_Sessions_OnUnregisterPlayersCallback CompletionDelegate);
 
@@ -136,8 +145,9 @@ EOS_DECLARE_FUNC(void) EOS_Sessions_UnregisterPlayers(EOS_HSessions Handle, cons
  * @param ClientData Arbitrary data that is passed back to you in the CompletionDelegate
  * @param CompletionDelegate A callback that is fired when the send invite operation completes, either successfully or in error
  *
- * @see EOS_Sessions_SendInviteOptions
- * @see EOS_Sessions_OnSendInviteCallback
+ * @return EOS_Success if the send invite completes successfully
+ *         EOS_InvalidParameters if any of the options are incorrect
+ *         EOS_NotFound if the session to send the invite from does not exist
  */
 EOS_DECLARE_FUNC(void) EOS_Sessions_SendInvite(EOS_HSessions Handle, const EOS_Sessions_SendInviteOptions* Options, void* ClientData, const EOS_Sessions_OnSendInviteCallback CompletionDelegate);
 
@@ -148,8 +158,9 @@ EOS_DECLARE_FUNC(void) EOS_Sessions_SendInvite(EOS_HSessions Handle, const EOS_S
  * @param ClientData Arbitrary data that is passed back to you in the CompletionDelegate
  * @param CompletionDelegate A callback that is fired when the reject invite operation completes, either successfully or in error
  *
- * @see EOS_Sessions_RejectInviteOptions
- * @see EOS_Sessions_OnRejectInviteCallback
+ * @return EOS_Success if the invite rejection completes successfully
+ *         EOS_InvalidParameters if any of the options are incorrect
+ *         EOS_NotFound if the invite does not exist
  */
 EOS_DECLARE_FUNC(void) EOS_Sessions_RejectInvite(EOS_HSessions Handle, const EOS_Sessions_RejectInviteOptions* Options, void* ClientData, const EOS_Sessions_OnRejectInviteCallback CompletionDelegate);
 
@@ -160,8 +171,6 @@ EOS_DECLARE_FUNC(void) EOS_Sessions_RejectInvite(EOS_HSessions Handle, const EOS
  * @param ClientData Arbitrary data that is passed back to you in the CompletionDelegate
  * @param CompletionDelegate A callback that is fired when the query invites operation completes, either successfully or in error
  *
- * @see EOS_Sessions_QueryInvitesOptions
- * @see EOS_Sessions_OnQueryInvitesCallback
  */
 EOS_DECLARE_FUNC(void) EOS_Sessions_QueryInvites(EOS_HSessions Handle, const EOS_Sessions_QueryInvitesOptions* Options, void* ClientData, const EOS_Sessions_OnQueryInvitesCallback CompletionDelegate);
 
@@ -171,8 +180,6 @@ EOS_DECLARE_FUNC(void) EOS_Sessions_QueryInvites(EOS_HSessions Handle, const EOS
  * @param Options the Options associated with retrieving the current invite count
  *
  * @return number of known invites for a given user or 0 if there is an error
- *
- * @see EOS_Sessions_GetInviteCountOptions
  */
 EOS_DECLARE_FUNC(uint32_t) EOS_Sessions_GetInviteCount(EOS_HSessions Handle, const EOS_Sessions_GetInviteCountOptions* Options);
 
@@ -181,13 +188,10 @@ EOS_DECLARE_FUNC(uint32_t) EOS_Sessions_GetInviteCount(EOS_HSessions Handle, con
  *
  * @param Options Structure containing the input parameters
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if the input is valid and an invite ID was returned
- * - EOS_InvalidParameters if any of the options are incorrect
- * - EOS_NotFound if the invite doesn't exist
+ * @return EOS_Success if the input is valid and an invite ID was returned
+ *         EOS_InvalidParameters if any of the options are incorrect
+ *         EOS_NotFound if the invite doesn't exist
  *
- * @see EOS_Sessions_GetInviteIdByIndexOptions
  * @see EOS_Sessions_GetInviteCount
  * @see EOS_Sessions_CopySessionHandleByInviteId
  */
@@ -203,12 +207,8 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Sessions_GetInviteIdByIndex(EOS_HSessions Hand
  * @param Options Structure containing required parameters such as the maximum number of search results
  * @param OutSessionSearchHandle The new search handle or null if there was an error creating the search handle
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if the search creation completes successfully
- * - EOS_InvalidParameters if any of the options are incorrect
- *
- * @see EOS_Sessions_CreateSessionSearchOptions
+ * @return EOS_Success if the search creation completes successfully
+ *         EOS_InvalidParameters if any of the options are incorrect
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Sessions_CreateSessionSearch(EOS_HSessions Handle, const EOS_Sessions_CreateSessionSearchOptions* Options, EOS_HSessionSearch* OutSessionSearchHandle);
 
@@ -218,29 +218,22 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Sessions_CreateSessionSearch(EOS_HSessions Han
  * @param Options Structure containing information about the active session to retrieve
  * @param OutSessionHandle The new active session handle or null if there was an error
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if the session handle was created successfully
- * - EOS_InvalidParameters if any of the options are incorrect
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- * - EOS_NotFound if the active session doesn't exist
- *
- * @see EOS_Sessions_CopyActiveSessionHandleOptions
+ * @return EOS_Success if the session handle was created successfully
+ *         EOS_InvalidParameters if any of the options are incorrect
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
+ *         EOS_NotFound if the active session doesn't exist
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Sessions_CopyActiveSessionHandle(EOS_HSessions Handle, const EOS_Sessions_CopyActiveSessionHandleOptions* Options, EOS_HActiveSession* OutSessionHandle);
 
 /**
  * Register to receive session invites.
- * @note If the returned NotificationId is valid, you must call EOS_Sessions_RemoveNotifySessionInviteReceived when you no longer wish to have your NotificationHandler called.
+ * @note must call RemoveNotifySessionInviteReceived to remove the notification
  *
  * @param Options Structure containing information about the session invite notification
  * @param ClientData Arbitrary data that is passed back to you in the CompletionDelegate
  * @param NotificationFn A callback that is fired when a session invite for a user has been received
  *
  * @return handle representing the registered callback
- *
- * @see EOS_Sessions_AddNotifySessionInviteReceivedOptions
- * @see EOS_Sessions_OnSessionInviteReceivedCallback
  */
 EOS_DECLARE_FUNC(EOS_NotificationId) EOS_Sessions_AddNotifySessionInviteReceived(EOS_HSessions Handle, const EOS_Sessions_AddNotifySessionInviteReceivedOptions* Options, void* ClientData, const EOS_Sessions_OnSessionInviteReceivedCallback NotificationFn);
 
@@ -253,16 +246,13 @@ EOS_DECLARE_FUNC(void) EOS_Sessions_RemoveNotifySessionInviteReceived(EOS_HSessi
 
 /**
  * Register to receive notifications when a user accepts a session invite via the social overlay.
- * @note If the returned NotificationId is valid, you must call EOS_Sessions_RemoveNotifySessionInviteAccepted when you no longer wish to have your NotificationHandler called.
+ * @note must call RemoveNotifySessionInviteAccepted to remove the notification
  *
  * @param Options Structure containing information about the request.
  * @param ClientData Arbitrary data that is passed back to you in the CompletionDelegate.
  * @param NotificationFn A callback that is fired when a a notification is received.
  *
  * @return handle representing the registered callback
- *
- * @see EOS_Sessions_AddNotifySessionInviteAcceptedOptions
- * @see EOS_Sessions_OnSessionInviteAcceptedCallback
  */
 EOS_DECLARE_FUNC(EOS_NotificationId) EOS_Sessions_AddNotifySessionInviteAccepted(EOS_HSessions Handle, const EOS_Sessions_AddNotifySessionInviteAcceptedOptions* Options, void* ClientData, const EOS_Sessions_OnSessionInviteAcceptedCallback NotificationFn);
 
@@ -274,39 +264,14 @@ EOS_DECLARE_FUNC(EOS_NotificationId) EOS_Sessions_AddNotifySessionInviteAccepted
 EOS_DECLARE_FUNC(void) EOS_Sessions_RemoveNotifySessionInviteAccepted(EOS_HSessions Handle, EOS_NotificationId InId);
 
 /**
- * Register to receive notifications when a user rejects a session invite.
- * @note If the returned NotificationId is valid, you must call EOS_Sessions_RemoveNotifySessionInviteRejected when you no longer wish to have your NotificationHandler called.
- *
- * @param Options Structure containing information about the request.
- * @param ClientData Arbitrary data that is passed back to you in the CompletionDelegate.
- * @param NotificationFn A callback that is fired when a notification is received.
- *
- * @return handle representing the registered callback
- *
- * @see EOS_Sessions_AddNotifySessionInviteRejectedOptions
- * @see EOS_Sessions_OnSessionInviteRejectedCallback
- */
-EOS_DECLARE_FUNC(EOS_NotificationId) EOS_Sessions_AddNotifySessionInviteRejected(EOS_HSessions Handle, const EOS_Sessions_AddNotifySessionInviteRejectedOptions* Options, void* ClientData, const EOS_Sessions_OnSessionInviteRejectedCallback NotificationFn);
-
-/**
- * Unregister from receiving notifications when a user rejects a session invite via the social overlay.
- *
- * @param InId Handle representing the registered callback
- */
-EOS_DECLARE_FUNC(void) EOS_Sessions_RemoveNotifySessionInviteRejected(EOS_HSessions Handle, EOS_NotificationId InId);
-
-/**
  * Register to receive notifications when a user accepts a session join game via the social overlay.
- * @note If the returned NotificationId is valid, you must call EOS_Sessions_RemoveNotifyJoinSessionAccepted when you no longer wish to have your NotificationHandler called
+ * @note must call RemoveNotifyJoinSessionAccepted to remove the notification
  *
  * @param Options Structure containing information about the request.
  * @param ClientData Arbitrary data that is passed back to you in the CompletionDelegate.
- * @param NotificationFn A callback that is fired when a notification is received.
+ * @param NotificationFn A callback that is fired when a a notification is received.
  *
  * @return handle representing the registered callback
- *
- * @see EOS_Sessions_AddNotifyJoinSessionAcceptedOptions
- * @see EOS_Sessions_OnJoinSessionAcceptedCallback
  */
 EOS_DECLARE_FUNC(EOS_NotificationId) EOS_Sessions_AddNotifyJoinSessionAccepted(EOS_HSessions Handle, const EOS_Sessions_AddNotifyJoinSessionAcceptedOptions* Options, void* ClientData, const EOS_Sessions_OnJoinSessionAcceptedCallback NotificationFn);
 
@@ -324,15 +289,12 @@ EOS_DECLARE_FUNC(void) EOS_Sessions_RemoveNotifyJoinSessionAccepted(EOS_HSession
  * @param Options Structure containing the input parameters
  * @param OutSessionHandle out parameter used to receive the session handle
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if the information is available and passed out in OutSessionHandle
- * - EOS_InvalidParameters if you pass an invalid invite ID or a null pointer for the out parameter
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- * - EOS_NotFound if the invite ID cannot be found
+ * @return EOS_Success if the information is available and passed out in OutSessionHandle
+ *         EOS_InvalidParameters if you pass an invalid invite ID or a null pointer for the out parameter
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
+ *         EOS_NotFound if the invite ID cannot be found
  *
  * @see EOS_Sessions_CopySessionHandleByInviteIdOptions
- * @see EOS_HSessionDetails
  * @see EOS_SessionDetails_Release
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Sessions_CopySessionHandleByInviteId(EOS_HSessions Handle, const EOS_Sessions_CopySessionHandleByInviteIdOptions* Options, EOS_HSessionDetails* OutSessionHandle);
@@ -344,15 +306,12 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Sessions_CopySessionHandleByInviteId(EOS_HSess
  * @param Options Structure containing the input parameters
  * @param OutSessionHandle out parameter used to receive the session handle
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if the information is available and passed out in OutSessionHandle
- * - EOS_InvalidParameters if you pass an invalid invite ID or a null pointer for the out parameter
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- * - EOS_NotFound if the invite ID cannot be found
+ * @return EOS_Success if the information is available and passed out in OutSessionHandle
+ *         EOS_InvalidParameters if you pass an invalid invite ID or a null pointer for the out parameter
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
+ *         EOS_NotFound if the invite ID cannot be found
  *
  * @see EOS_Sessions_CopySessionHandleByUiEventIdOptions
- * @see EOS_HSessionDetails
  * @see EOS_SessionDetails_Release
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Sessions_CopySessionHandleByUiEventId(EOS_HSessions Handle, const EOS_Sessions_CopySessionHandleByUiEventIdOptions* Options, EOS_HSessionDetails* OutSessionHandle);
@@ -364,15 +323,12 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Sessions_CopySessionHandleByUiEventId(EOS_HSes
  * @param Options Structure containing the input parameters
  * @param OutSessionHandle out parameter used to receive the session handle
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if the information is available and passed out in OutSessionHandle
- * - EOS_InvalidParameters if you pass an invalid invite ID or a null pointer for the out parameter
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- * - EOS_NotFound if there is no session with bPresenceEnabled
+ * @return EOS_Success if the information is available and passed out in OutSessionHandle
+ *         EOS_InvalidParameters if you pass an invalid invite ID or a null pointer for the out parameter
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
+ *         EOS_NotFound if there is no session with bPresenceEnabled
  *
  * @see EOS_Sessions_CopySessionHandleForPresenceOptions
- * @see EOS_HSessionDetails
  * @see EOS_SessionDetails_Release
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Sessions_CopySessionHandleForPresence(EOS_HSessions Handle, const EOS_Sessions_CopySessionHandleForPresenceOptions* Options, EOS_HSessionDetails* OutSessionHandle);
@@ -382,16 +338,12 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Sessions_CopySessionHandleForPresence(EOS_HSes
  *
  * @param Options Structure containing the input parameters
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if the user is found in the specified session
- * - EOS_NotFound if the user is not found in the specified session
- * - EOS_InvalidParameters if you pass an invalid invite ID or a null pointer for the out parameter
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- * - EOS_Invalid_ProductUserID if an invalid target user is specified
- * - EOS_Sessions_InvalidSession if the session specified is invalid
- *
- * @see EOS_Sessions_IsUserInSessionOptions
+ * @return EOS_Success if the user is found in the specified session
+ *		   EOS_NotFound if the user is not found in the specified session
+ *		   EOS_InvalidParameters if you pass an invalid invite ID or a null pointer for the out parameter
+ *		   EOS_IncompatibleVersion if the API version passed in is incorrect
+ *		   EOS_Invalid_ProductUserID if an invalid target user is specified
+ *		   EOS_Sessions_InvalidSession if the session specified is invalid
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Sessions_IsUserInSession(EOS_HSessions Handle, const EOS_Sessions_IsUserInSessionOptions* Options);
 
@@ -400,67 +352,11 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_Sessions_IsUserInSession(EOS_HSessions Handle,
  *
  * @param Options Options related to dumping session state such as the session name
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if the output operation completes successfully
- * - EOS_NotFound if the session specified does not exist
- * - EOS_InvalidParameters if any of the options are incorrect
- *
- * @see EOS_Sessions_DumpSessionStateOptions
+ * @return EOS_Success if the output operation completes successfully
+ *         EOS_NotFound if the session specified does not exist
+ *         EOS_InvalidParameters if any of the options are incorrect
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_Sessions_DumpSessionState(EOS_HSessions Handle, const EOS_Sessions_DumpSessionStateOptions* Options);
-
-/**
- * Register to receive notifications about leave session requests performed by local user via the overlay.
- * When user requests to leave the session in the social overlay, the SDK does not automatically leave the session, it is up to the game to perform any necessary cleanup and call the EOS_Sessions_DestroySession method using the SessionName sent in the notification function.
- * @note If the returned NotificationId is valid, you must call EOS_Sessions_RemoveNotifyLeaveSessionRequested when you no longer wish to have your NotificationHandler called.
- *
- * @param Options Structure containing information about the request.
- * @param ClientData Arbitrary data that is passed back to you in the CompletionDelegate.
- * @param NotificationFn A callback that is fired when a notification is received.
- *
- * @return handle representing the registered callback
- *
- * @see EOS_Sessions_AddNotifyLeaveSessionRequestedOptions
- * @see EOS_Sessions_OnLeaveSessionRequestedCallback
- */
-EOS_DECLARE_FUNC(EOS_NotificationId) EOS_Sessions_AddNotifyLeaveSessionRequested(EOS_HSessions Handle, const EOS_Sessions_AddNotifyLeaveSessionRequestedOptions* Options, void* ClientData, const EOS_Sessions_OnLeaveSessionRequestedCallback NotificationFn);
-
-/**
- * Unregister from receiving notifications when a user performs a leave lobby action via the overlay.
- *
- * @param InId Handle representing the registered callback
- */
-EOS_DECLARE_FUNC(void) EOS_Sessions_RemoveNotifyLeaveSessionRequested(EOS_HSessions Handle, EOS_NotificationId InId);
-
-/**
- * Register to receive notifications about a session "INVITE" performed by a local user via the overlay.
- * This is only needed when a configured integrated platform has EOS_IPMF_DisableSDKManagedSessions set.  The EOS SDK will
- * then use the state of EOS_IPMF_PreferEOSIdentity and EOS_IPMF_PreferIntegratedIdentity to determine when the NotificationFn is
- * called.
- *
- * @note If the returned NotificationId is valid, you must call EOS_Sessions_RemoveNotifySendSessionNativeInviteRequested when you no longer wish to have your NotificationHandler called.
- *
- * @param Options Structure containing information about the request.
- * @param ClientData Arbitrary data that is passed back to you in the CompletionDelegate.
- * @param NotificationFn A callback that is fired when a notification is received.
- *
- * @return handle representing the registered callback
- *
- * @see EOS_Sessions_AddNotifySendSessionNativeInviteRequestedOptions
- * @see EOS_Sessions_OnSendSessionNativeInviteRequestedCallback
- * @see EOS_IPMF_DisableSDKManagedSessions
- * @see EOS_IPMF_PreferEOSIdentity
- * @see EOS_IPMF_PreferIntegratedIdentity
- */
-EOS_DECLARE_FUNC(EOS_NotificationId) EOS_Sessions_AddNotifySendSessionNativeInviteRequested(EOS_HSessions Handle, const EOS_Sessions_AddNotifySendSessionNativeInviteRequestedOptions* Options, void* ClientData, const EOS_Sessions_OnSendSessionNativeInviteRequestedCallback NotificationFn);
-
-/**
- * Unregister from receiving notifications when a user requests a send invite via the overlay.
- *
- * @param InId Handle representing the registered callback
- */
-EOS_DECLARE_FUNC(void) EOS_Sessions_RemoveNotifySendSessionNativeInviteRequested(EOS_HSessions Handle, EOS_NotificationId InId);
 
 /**
  * To modify sessions, you must call EOS_Sessions_CreateSessionModification to create a Session Modification handle. To modify that handle, call
@@ -475,13 +371,9 @@ EOS_DECLARE_FUNC(void) EOS_Sessions_RemoveNotifySendSessionNativeInviteRequested
  *
  * @param Options Options associated with the bucket ID of the session
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if setting this parameter was successful
- * - EOS_InvalidParameters if the bucket ID is invalid or null
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- *
- * @see EOS_SessionModification_SetBucketIdOptions
+ * @return EOS_Success if setting this parameter was successful
+ *         EOS_InvalidParameters if the bucket ID is invalid or null
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionModification_SetBucketId(EOS_HSessionModification Handle, const EOS_SessionModification_SetBucketIdOptions* Options);
 
@@ -494,13 +386,9 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionModification_SetBucketId(EOS_HSessionMo
  *
  * @param Options Options associated with the host address of the session
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if setting this parameter was successful
- * - EOS_InvalidParameters if the host ID is an empty string
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- *
- * @see EOS_SessionModification_SetHostAddressOptions
+ * @return EOS_Success if setting this parameter was successful
+ *         EOS_InvalidParameters if the host ID is an empty string
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionModification_SetHostAddress(EOS_HSessionModification Handle, const EOS_SessionModification_SetHostAddressOptions* Options);
 
@@ -510,12 +398,8 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionModification_SetHostAddress(EOS_HSessio
  *
  * @param Options Options associated with the permission level of the session
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if setting this parameter was successful
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- *
- * @see EOS_SessionModification_SetPermissionLevelOptions
+ * @return EOS_Success if setting this parameter was successful
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionModification_SetPermissionLevel(EOS_HSessionModification Handle, const EOS_SessionModification_SetPermissionLevelOptions* Options);
 
@@ -525,12 +409,8 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionModification_SetPermissionLevel(EOS_HSe
  *
  * @param Options Options associated with setting the join in progress state the session
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if setting this parameter was successful
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- *
- * @see EOS_SessionModification_SetJoinInProgressAllowedOptions
+ * @return EOS_Success if setting this parameter was successful
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionModification_SetJoinInProgressAllowed(EOS_HSessionModification Handle, const EOS_SessionModification_SetJoinInProgressAllowedOptions* Options);
 
@@ -540,12 +420,8 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionModification_SetJoinInProgressAllowed(E
  *
  * @param Options Options associated with max number of players in this session
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if setting this parameter was successful
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- *
- * @see EOS_SessionModification_SetMaxPlayersOptions
+ * @return EOS_Success if setting this parameter was successful
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionModification_SetMaxPlayers(EOS_HSessionModification Handle, const EOS_SessionModification_SetMaxPlayersOptions* Options);
 
@@ -555,29 +431,10 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionModification_SetMaxPlayers(EOS_HSession
  *
  * @param Options Options associated with invites allowed flag for this session.
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if setting this parameter was successful
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- *
- * @see EOS_SessionModification_SetInvitesAllowedOptions
+ * @return EOS_Success if setting this parameter was successful
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionModification_SetInvitesAllowed(EOS_HSessionModification Handle, const EOS_SessionModification_SetInvitesAllowedOptions* Options);
-
-/**
- * Set the Allowed Platform IDs for the session.
- *
- * @param Options Options associated with allowed Platform IDs for this session.
- *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if setting this parameter was successful
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- * - EOS_InvalidParameters if the attribution is missing information or otherwise invalid
- *
- * @see EOS_SessionModification_SetAllowedPlatformIdsOptions
- */
-EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionModification_SetAllowedPlatformIds(EOS_HSessionModification Handle, const EOS_SessionModification_SetAllowedPlatformIdsOptions* Options);
 
 /**
  * Associate an attribute with this session
@@ -586,13 +443,9 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionModification_SetAllowedPlatformIds(EOS_
  *
  * @param Options Options to set the attribute and its advertised state
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if setting this parameter was successful
- * - EOS_InvalidParameters if the attribution is missing information or otherwise invalid
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- *
- * @see EOS_SessionModification_AddAttributeOptions
+ * @return EOS_Success if setting this parameter was successful
+ *		   EOS_InvalidParameters if the attribution is missing information or otherwise invalid
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionModification_AddAttribute(EOS_HSessionModification Handle, const EOS_SessionModification_AddAttributeOptions* Options);
 
@@ -601,13 +454,9 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionModification_AddAttribute(EOS_HSessionM
  *
  * @param Options Specify the key of the attribute to remove
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if removing this parameter was successful
- * - EOS_InvalidParameters if the key is null or empty
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- *
- * @see EOS_SessionModification_RemoveAttributeOptions
+ * @return EOS_Success if removing this parameter was successful
+ *		   EOS_InvalidParameters if the key is null or empty
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionModification_RemoveAttribute(EOS_HSessionModification Handle, const EOS_SessionModification_RemoveAttributeOptions* Options);
 
@@ -622,11 +471,9 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionModification_RemoveAttribute(EOS_HSessi
  * @param Options Structure containing the input parameters
  * @param OutActiveSessionInfo Out parameter used to receive the EOS_ActiveSession_Info structure.
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if the information is available and passed out in OutActiveSessionInfo
- * - EOS_InvalidParameters if you pass a null pointer for the out parameter
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
+ * @return EOS_Success if the information is available and passed out in OutActiveSessionInfo
+ *         EOS_InvalidParameters if you pass a null pointer for the out parameter
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  *
  * @see EOS_ActiveSession_Info
  * @see EOS_ActiveSession_CopyInfoOptions
@@ -640,8 +487,6 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_ActiveSession_CopyInfo(EOS_HActiveSession Hand
  * @param Options the Options associated with retrieving the registered player count
  *
  * @return number of registered players in the active session or 0 if there is an error
- *
- * @see EOS_ActiveSession_GetRegisteredPlayerCountOptions
  */
 EOS_DECLARE_FUNC(uint32_t) EOS_ActiveSession_GetRegisteredPlayerCount(EOS_HActiveSession Handle, const EOS_ActiveSession_GetRegisteredPlayerCountOptions* Options);
 
@@ -659,7 +504,7 @@ EOS_DECLARE_FUNC(EOS_ProductUserId) EOS_ActiveSession_GetRegisteredPlayerByIndex
 
 /**
  * This class represents the details of a session, including its session properties and the attribution associated with it
- * Locally created or joined active sessions will contain this information as will search results.
+ * Locally created or joined active sessions will contain this information as will search results.   
  * A handle to a session is required to join a session via search or invite
  */
 
@@ -670,11 +515,9 @@ EOS_DECLARE_FUNC(EOS_ProductUserId) EOS_ActiveSession_GetRegisteredPlayerByIndex
  * @param Options Structure containing the input parameters
  * @param OutSessionInfo Out parameter used to receive the EOS_SessionDetails_Info structure.
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if the information is available and passed out in OutSessionInfo
- * - EOS_InvalidParameters if you pass a null pointer for the out parameter
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
+ * @return EOS_Success if the information is available and passed out in OutSessionInfo
+ *         EOS_InvalidParameters if you pass a null pointer for the out parameter
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  *
  * @see EOS_SessionDetails_Info
  * @see EOS_SessionDetails_CopyInfoOptions
@@ -688,8 +531,6 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionDetails_CopyInfo(EOS_HSessionDetails Ha
  * @param Options the Options associated with retrieving the attribute count
  *
  * @return number of attributes on the session or 0 if there is an error
- *
- * @see EOS_SessionDetails_GetSessionAttributeCountOptions
  */
 EOS_DECLARE_FUNC(uint32_t) EOS_SessionDetails_GetSessionAttributeCount(EOS_HSessionDetails Handle, const EOS_SessionDetails_GetSessionAttributeCountOptions* Options);
 
@@ -700,11 +541,9 @@ EOS_DECLARE_FUNC(uint32_t) EOS_SessionDetails_GetSessionAttributeCount(EOS_HSess
  * @param Options Structure containing the input parameters
  * @param OutSessionAttribute Out parameter used to receive the EOS_SessionDetails_Attribute structure.
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if the information is available and passed out in OutSessionAttribute
- * - EOS_InvalidParameters if you pass a null pointer for the out parameter
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
+ * @return EOS_Success if the information is available and passed out in OutSessionAttribute
+ *         EOS_InvalidParameters if you pass a null pointer for the out parameter
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  *
  * @see EOS_SessionDetails_Attribute
  * @see EOS_SessionDetails_CopySessionAttributeByIndexOptions
@@ -719,11 +558,9 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionDetails_CopySessionAttributeByIndex(EOS
  * @param Options Structure containing the input parameters
  * @param OutSessionAttribute Out parameter used to receive the EOS_SessionDetails_Attribute structure.
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if the information is available and passed out in OutSessionAttribute
- * - EOS_InvalidParameters if you pass a null pointer for the out parameter
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
+ * @return EOS_Success if the information is available and passed out in OutSessionAttribute
+ *         EOS_InvalidParameters if you pass a null pointer for the out parameter
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  *
  * @see EOS_SessionDetails_Attribute
  * @see EOS_SessionDetails_CopySessionAttributeByKeyOptions
@@ -741,13 +578,9 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionDetails_CopySessionAttributeByKey(EOS_H
  *
  * @param Options A specific session ID for which to search
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if setting this session ID was successful
- * - EOS_InvalidParameters if the session ID is invalid or null
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- *
- * @see EOS_SessionSearch_SetSessionIdOptions
+ * @return EOS_Success if setting this session ID was successful
+ *         EOS_InvalidParameters if the session ID is invalid or null
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionSearch_SetSessionId(EOS_HSessionSearch Handle, const EOS_SessionSearch_SetSessionIdOptions* Options);
 
@@ -757,13 +590,9 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionSearch_SetSessionId(EOS_HSessionSearch 
  *
  * @param Options a specific target user ID to find
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if setting this target user ID was successful
- * - EOS_InvalidParameters if the target user ID is invalid or null
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- *
- * @see EOS_SessionSearch_SetTargetUserIdOptions
+ * @return EOS_Success if setting this target user ID was successful
+ *         EOS_InvalidParameters if the target user ID is invalid or null
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionSearch_SetTargetUserId(EOS_HSessionSearch Handle, const EOS_SessionSearch_SetTargetUserIdOptions* Options);
 
@@ -772,13 +601,10 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionSearch_SetTargetUserId(EOS_HSessionSear
  *
  * @param Options a search parameter and its comparison op
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if setting this search parameter was successful
- * - EOS_InvalidParameters if the search criteria is invalid or null
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
+ * @return EOS_Success if setting this search parameter was successful
+ *         EOS_InvalidParameters if the search criteria is invalid or null
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  *
- * @see EOS_SessionSearch_SetParameterOptions
  * @see EOS_Sessions_AttributeData
  * @see EOS_EComparisonOp
  */
@@ -789,14 +615,10 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionSearch_SetParameter(EOS_HSessionSearch 
  *
  * @params Options a search parameter key name to remove
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if removing this search parameter was successful
- * - EOS_InvalidParameters if the search key is invalid or null
- * - EOS_NotFound if the parameter was not a part of the search criteria
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- *
- * @see EOS_SessionSearch_RemoveParameterOptions
+ * @return EOS_Success if removing this search parameter was successful
+ *         EOS_InvalidParameters if the search key is invalid or null
+ *		   EOS_NotFound if the parameter was not a part of the search criteria
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionSearch_RemoveParameter(EOS_HSessionSearch Handle, const EOS_SessionSearch_RemoveParameterOptions* Options);
 
@@ -805,13 +627,9 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionSearch_RemoveParameter(EOS_HSessionSear
  *
  * @param Options maximum number of search results to return in the query
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if setting the max results was successful
- * - EOS_InvalidParameters if the number of results requested is invalid
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
- *
- * @see EOS_SessionSearch_SetMaxResultsOptions
+ * @return EOS_Success if setting the max results was successful
+ *         EOS_InvalidParameters if the number of results requested is invalid
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionSearch_SetMaxResults(EOS_HSessionSearch Handle, const EOS_SessionSearch_SetMaxResultsOptions* Options);
 
@@ -823,8 +641,9 @@ EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionSearch_SetMaxResults(EOS_HSessionSearch
  * @param ClientData Arbitrary data that is passed back to you in the CompletionDelegate
  * @param CompletionDelegate A callback that is fired when the search operation completes, either successfully or in error
  *
- * @see EOS_SessionSearch_FindOptions
- * @see EOS_SessionSearch_OnFindCallback
+ * @return EOS_Success if the find operation completes successfully
+ *         EOS_NotFound if searching for an individual session by sessionid or targetuserid returns no results
+ *         EOS_InvalidParameters if any of the options are incorrect
  */
 EOS_DECLARE_FUNC(void) EOS_SessionSearch_Find(EOS_HSessionSearch Handle, const EOS_SessionSearch_FindOptions* Options, void* ClientData, const EOS_SessionSearch_OnFindCallback CompletionDelegate);
 
@@ -834,8 +653,6 @@ EOS_DECLARE_FUNC(void) EOS_SessionSearch_Find(EOS_HSessionSearch Handle, const E
  * @param Options Options associated with the search count
  *
  * @return return the number of search results found by the query or 0 if search is not complete
- *
- * @see EOS_SessionSearch_GetSearchResultCountOptions
  */
 EOS_DECLARE_FUNC(uint32_t) EOS_SessionSearch_GetSearchResultCount(EOS_HSessionSearch Handle, const EOS_SessionSearch_GetSearchResultCountOptions* Options);
 
@@ -846,14 +663,11 @@ EOS_DECLARE_FUNC(uint32_t) EOS_SessionSearch_GetSearchResultCount(EOS_HSessionSe
  * @param Options Structure containing the input parameters
  * @param OutSessionHandle out parameter used to receive the session handle
  *
- * @return EOS_EResult containing the result of the operation.
- * Possible result codes:
- * - EOS_Success if the information is available and passed out in OutSessionHandle
- * - EOS_InvalidParameters if you pass an invalid index or a null pointer for the out parameter
- * - EOS_IncompatibleVersion if the API version passed in is incorrect
+ * @return EOS_Success if the information is available and passed out in OutSessionHandle
+ *         EOS_InvalidParameters if you pass an invalid index or a null pointer for the out parameter
+ *         EOS_IncompatibleVersion if the API version passed in is incorrect
  *
  * @see EOS_SessionSearch_CopySearchResultByIndexOptions
- * @see EOS_HSessionDetails
  * @see EOS_SessionDetails_Release
  */
 EOS_DECLARE_FUNC(EOS_EResult) EOS_SessionSearch_CopySearchResultByIndex(EOS_HSessionSearch Handle, const EOS_SessionSearch_CopySearchResultByIndexOptions* Options, EOS_HSessionDetails* OutSessionHandle);
