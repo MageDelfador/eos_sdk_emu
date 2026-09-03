@@ -271,7 +271,7 @@ void Settings::load_settings()
         casestr("ERR")  : llvl = Log::LogLevel::ERR  ; break;
         casestr("FATAL"): llvl = Log::LogLevel::FATAL; break;
         casestr("OFF")  :
-        default         : llvl = Log::LogLevel::TRACE;
+        default         : llvl = Log::LogLevel::OFF;
     }
     APP_LOG(Log::LogLevel::INFO, "Setting log level to: %s", Log::loglevel_to_str(llvl));
     Log::set_loglevel(llvl);
