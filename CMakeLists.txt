@@ -249,7 +249,7 @@ target_include_directories(
   extra/Socket/include
 )
 
-set(EOS_SDK_119_INCLUDE "${CMAKE_SOURCE_DIR}/../EOSEmu/EOS-SDK-49960398-Release-v1.19.0.3/SDK/Include")
+set(EOS_SDK_119_INCLUDE "${CMAKE_SOURCE_DIR}/EOS-SDK-49960398-Release-v1.19.0.3/SDK/Include")
 if(EXISTS "${EOS_SDK_119_INCLUDE}")
   set_source_files_properties(
     eos_dll/eos_missing_stubs.generated.cpp
