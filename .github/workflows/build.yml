@@ -64,6 +64,11 @@ jobs:
             Write-Host "eos_rtc_audio.h not found, skipping patch"
           }
 
+      - name: Regenerate EOS stubs
+        shell: pwsh
+        run: |
+          python tools/generate_eos_stubs.py
+
       - name: Configure CMake
         shell: pwsh
         env:
