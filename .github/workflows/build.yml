@@ -27,10 +27,14 @@ jobs:
           doNotCache: true
         env:
           VCPKG_DEFAULT_TRIPLET: ${{ matrix.arch }}-windows-static
+          VCPKG_TARGET_TRIPLET: ${{ matrix.arch }}-windows-static
           VCPKG_BINARY_SOURCES: 'clear'
 
       - name: Configure CMake
         shell: pwsh
+        env:
+          VCPKG_TARGET_TRIPLET: ${{ matrix.arch }}-windows-static
+          VCPKG_DEFAULT_TRIPLET: ${{ matrix.arch }}-windows-static
         run: |
           if ("${{ matrix.arch }}" -eq "x64") {
             $arch_flag = "-DX64=ON"
