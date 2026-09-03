@@ -27,6 +27,7 @@ jobs:
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: '${{ runner.workspace }}/vcpkg'
+          vcpkgGitCommitId: 'master'
           triplet: 'x64-windows-static'
           vcpkgArguments: 'install protobuf'
           vcpkgUseCache: true
