@@ -42,17 +42,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-vcpkg-
 
-      - name: Locate Visual Studio
+      - name: Locate Visual Studio 2022
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -version "[17.0,18.0)" -property installationPath
           if (-not $vsPath) {
-            Write-Error "Visual Studio with C++ tools not found"
+            Write-Error "Visual Studio 2022 with C++ tools not found"
             exit 1
           }
           echo "VS_INSTALL_PATH=$vsPath" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Visual Studio found at: $vsPath"
+          Write-Host "Visual Studio 2022 found at: $vsPath"
 
       - name: Setup MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
