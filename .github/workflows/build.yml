@@ -34,20 +34,36 @@ jobs:
           echo "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
           echo "$vcpkgRoot" | Out-File -FilePath $env:GITHUB_PATH -Append
 
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_ROOT }}/installed
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', '**/vcpkg.json') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-
+
+      - name: Locate Visual Studio
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vsPath) {
+            Write-Error "Visual Studio with C++ tools not found"
+            exit 1
+          }
+          echo "VS_INSTALL_PATH=$vsPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Visual Studio found at: $vsPath"
+
       - name: Setup MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
-      - name: Install dependencies
+      - name: Install protobuf static (editable)
         shell: pwsh
         run: |
-          $installedDir = "D:\vcpkg\installed\x64-windows-static"
-          if (Test-Path $installedDir) {
-            Remove-Item -Recurse -Force $installedDir
-          }
-          vcpkg install protobuf:x64-windows-static nlohmann-json:x64-windows-static --recurse --binarysource=clear
-          vcpkg list
+          vcpkg remove abseil:x64-windows-static utf8-range:x64-windows-static protobuf:x64-windows-static --recurse
+          vcpkg install protobuf:x64-windows-static --editable --recurse --binarysource=clear
 
       - name: Configure CMake
         shell: pwsh
@@ -60,34 +76,34 @@ jobs:
 
           cmake -S "$env:GITHUB_WORKSPACE" `
                 -B $buildDir `
-                -G "Ninja" `
-                -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+                -G "Visual Studio 17 2022" `
+                -A x64 `
+                -DCMAKE_GENERATOR_INSTANCE="$env:VS_INSTALL_PATH" `
                 -DX64=ON `
-                "-DCMAKE_TOOLCHAIN_FILE=D:/vcpkg/scripts/buildsystems/vcpkg.cmake" `
-                "-DVCPKG_TARGET_TRIPLET=x64-windows-static" `
-                "-DCMAKE_PREFIX_PATH=D:/vcpkg/installed/x64-windows-static"
+                -DCMAKE_BUILD_TYPE=Release `
+                "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+                "-DVCPKG_TARGET_TRIPLET=x64-windows-static"
 
       - name: Build
         shell: pwsh
         run: |
-          cmake --build "$env:GITHUB_WORKSPACE\build"
+          cmake --build "$env:GITHUB_WORKSPACE\build" --config Release --clean-first
 
       - name: Verify DLL imports
         shell: pwsh
         run: |
-          $dll = Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Recurse -Filter "EOSSDK-Win64-Shipping.dll" | Select-Object -First 1
-          if (-not $dll) {
-            Write-Error "EOSSDK-Win64-Shipping.dll not found anywhere in workspace!"
+          $dllPath = "$env:GITHUB_WORKSPACE\build\bin\Release\EOSSDK-Win64-Shipping.dll"
+          if (Test-Path $dllPath) {
+            python -c "import pefile; pe=pefile.PE(r'$dllPath'); deps=[e.dll.decode() for e in pe.DIRECTORY_ENTRY_IMPORT]; print('IMPORTS:', ', '.join(sorted(deps)))"
+          } else {
+            Write-Error "DLL not found at $dllPath"
             exit 1
           }
-          Write-Host "Found DLL at: $($dll.FullName)"
-          python -c "import pefile; pe=pefile.PE(r'$($dll.FullName)'); deps=[e.dll.decode() for e in pe.DIRECTORY_ENTRY_IMPORT]; print('IMPORTS:', ', '.join(sorted(deps)))"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: EOSSDK-Win64-Shipping-RelWithDebInfo
+          name: EOSSDK-Win64-Shipping
           path: |
-            **/EOSSDK-Win64-Shipping.dll
-            **/*.dll
-            **/*.pdb
+            build/bin/Release/EOSSDK-Win64-Shipping.dll
+            build/**/*.dll
