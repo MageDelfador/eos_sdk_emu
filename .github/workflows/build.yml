@@ -43,6 +43,7 @@ jobs:
           }
           cmake -B build -S . `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET="${{ matrix.arch }}-windows-static" `
             $arch_flag `
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
