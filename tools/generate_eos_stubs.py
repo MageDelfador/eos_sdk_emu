@@ -10,7 +10,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SDK_DIRS = [
-    ROOT / "extra" / "eos_sdk",
     ROOT.parent / "EOSEmu" / "EOS-SDK-49960398-Release-v1.19.0.3" / "SDK" / "Include",
 ]
 TARGET_EXPORTS = Path(__file__).with_name("missing_exports.txt")
