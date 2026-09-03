@@ -42,8 +42,25 @@ jobs:
       - name: Install dependencies
         shell: pwsh
         run: |
-          vcpkg remove abseil:x64-windows-static utf8-range:x64-windows-static protobuf:x64-windows-static nlohmann-json:x64-windows-static --recurse
+          $installedDir = "D:\vcpkg\installed\x64-windows-static"
+          if (Test-Path $installedDir) {
+            Write-Host "Removing old installed directory: $installedDir"
+            Remove-Item -Recurse -Force $installedDir
+          }
           vcpkg install protobuf:x64-windows-static nlohmann-json:x64-windows-static --recurse --binarysource=clear
+          Write-Host "Installed packages:"
+          vcpkg list
+
+      - name: Debug vcpkg installation
+        shell: pwsh
+        run: |
+          Write-Host "VCPKG_ROOT = $env:VCPKG_ROOT"
+          Write-Host "Listing D:\vcpkg\installed\x64-windows-static\share:"
+          if (Test-Path "D:\vcpkg\installed\x64-windows-static\share") {
+            Get-ChildItem "D:\vcpkg\installed\x64-windows-static\share" | Select-Object Name
+          } else {
+            Write-Host "share directory not found!"
+          }
 
       - name: Configure CMake (Ninja)
         shell: pwsh
@@ -59,8 +76,9 @@ jobs:
                 -G "Ninja" `
                 -DCMAKE_BUILD_TYPE=Release `
                 -DX64=ON `
-                "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
-                "-DVCPKG_TARGET_TRIPLET=x64-windows-static"
+                "-DCMAKE_TOOLCHAIN_FILE=D:/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+                "-DVCPKG_TARGET_TRIPLET=x64-windows-static" `
+                "-DCMAKE_PREFIX_PATH=D:/vcpkg/installed/x64-windows-static"
 
       - name: Build
         shell: pwsh
