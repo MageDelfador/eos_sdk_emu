@@ -26,7 +26,7 @@ jobs:
       - name: Setup vcpkg
         shell: pwsh
         run: |
-          $vcpkgRoot = "D:\vcpkg"
+          $vcpkgRoot = "C:\vcpkg"
           if (-not (Test-Path $vcpkgRoot)) {
             git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
           }
@@ -37,10 +37,10 @@ jobs:
       - name: Cache vcpkg packages
         uses: actions/cache@v4
         with:
-          path: ${{ env.VCPKG_ROOT }}/installed
-          key: ${{ runner.os }}-vcpkg-static-${{ hashFiles('vcpkg.json', '**/vcpkg.json') }}
+          path: C:\vcpkg\installed
+          key: ${{ runner.os }}-vcpkg-c-${{ hashFiles('vcpkg.json', '**/vcpkg.json') }}
           restore-keys: |
-            ${{ runner.os }}-vcpkg-static-
+            ${{ runner.os }}-vcpkg-c-
 
       - name: Setup MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
@@ -53,6 +53,8 @@ jobs:
           vcpkg remove protobuf:x64-windows-static --recurse
           vcpkg install protobuf:x64-windows-static
           vcpkg list
+          Write-Host "Protobuf config files:"
+          Get-ChildItem -Path "C:\vcpkg\installed\x64-windows-static\share\protobuf" -Filter "*config*" -Recurse | Select-Object FullName
 
       - name: Configure CMake
         shell: pwsh
@@ -63,6 +65,9 @@ jobs:
           }
           New-Item -ItemType Directory -Path $buildDir | Out-Null
 
+          Write-Host "VCPKG_ROOT = $env:VCPKG_ROOT"
+          Write-Host "GITHUB_WORKSPACE = $env:GITHUB_WORKSPACE"
+
           cmake -S "$env:GITHUB_WORKSPACE" `
                 -B $buildDir `
                 -G "Visual Studio 17 2022" `
@@ -71,6 +76,7 @@ jobs:
                 -DCMAKE_BUILD_TYPE=Release `
                 "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
                 "-DVCPKG_TARGET_TRIPLET=x64-windows-static" `
+                "-DProtobuf_DIR=$env:VCPKG_ROOT/installed/x64-windows-static/share/protobuf" `
                 "-DCMAKE_PREFIX_PATH=$env:VCPKG_ROOT/installed/x64-windows-static"
 
       - name: Build
