@@ -1,4 +1,4 @@
-name: Build
+name: Build Windows (Static Single DLL)
 
 on:
   push:
@@ -8,94 +8,89 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-windows:
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x64, x86]
-        build_type: [Release]
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          submodules: 'recursive'
+          python-version: '3.x'
+
+      - name: Install pefile
+        run: pip install pefile
 
       - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-          doNotCache: true
-        env:
-          VCPKG_DEFAULT_TRIPLET: ${{ matrix.arch }}-windows-static
-          VCPKG_TARGET_TRIPLET: ${{ matrix.arch }}-windows-static
-          VCPKG_BINARY_SOURCES: 'clear'
-
-      - name: Patch eos_p2p.h to replace EOS_P2P_PacketQueueInfo with void
         shell: pwsh
         run: |
-          $file = "extra/eos_sdk/eos_p2p.h"
-          $content = Get-Content $file -Raw
-          $content = $content -replace 'EOS_P2P_PacketQueueInfo\s*\*', 'void*'
-          Set-Content $file -Value $content
-          Write-Host "Patched eos_p2p.h"
-
-      - name: Patch EOS SDK missing types
-        shell: pwsh
-        run: |
-          $header = "extra/eos_sdk/eos_rtc_audio.h"
-          if (Test-Path $header) {
-            $content = Get-Content $header -Raw
-            if ($content -notmatch 'EOS_RTCAudio_RegisterPlatformUserOptions') {
-              $typeDef = @"
-          EOS_STRUCT(EOS_RTCAudio_RegisterPlatformUserOptions, (
-              int32_t ApiVersion;
-              const char* PlatformUserId;
-          ));
-          
-          "@
-              Add-Content -Path $header -Value "`n$typeDef"
-              Write-Host "Added EOS_RTCAudio_RegisterPlatformUserOptions definition to eos_rtc_audio.h"
-            } else {
-              Write-Host "EOS_RTCAudio_RegisterPlatformUserOptions already defined"
-            }
-          } else {
-            Write-Host "eos_rtc_audio.h not found, skipping patch"
+          $vcpkgRoot = "D:\vcpkg"
+          if (-not (Test-Path $vcpkgRoot)) {
+            git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
           }
+          & "$vcpkgRoot\bootstrap-vcpkg.bat"
+          echo "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "$vcpkgRoot" | Out-File -FilePath $env:GITHUB_PATH -Append
 
-      - name: Regenerate EOS stubs
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_ROOT }}/installed
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', '**/vcpkg.json') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-
+
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install protobuf static (editable)
         shell: pwsh
         run: |
-          python tools/generate_eos_stubs.py
+          vcpkg remove abseil:x64-windows-static utf8-range:x64-windows-static protobuf:x64-windows-static --recurse
+          vcpkg install protobuf:x64-windows-static --editable --recurse --binarysource=clear
 
       - name: Configure CMake
         shell: pwsh
-        env:
-          VCPKG_TARGET_TRIPLET: ${{ matrix.arch }}-windows-static
-          VCPKG_DEFAULT_TRIPLET: ${{ matrix.arch }}-windows-static
         run: |
-          if ("${{ matrix.arch }}" -eq "x64") {
-            $arch_flag = "-DX64=ON"
-          } else {
-            $arch_flag = "-DX86=ON"
+          $buildDir = "$env:GITHUB_WORKSPACE\build"
+          if (Test-Path $buildDir) {
+            Remove-Item -Recurse -Force $buildDir
           }
-          cmake -B build -S . `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET="${{ matrix.arch }}-windows-static" `
-            $arch_flag `
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          New-Item -ItemType Directory -Path $buildDir | Out-Null
+
+          cmake -S "$env:GITHUB_WORKSPACE" `
+                -B $buildDir `
+                -G "Visual Studio 17 2022" `
+                -A x64 `
+                -DX64=ON `
+                -DCMAKE_BUILD_TYPE=Release `
+                "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+                "-DVCPKG_TARGET_TRIPLET=x64-windows-static"
 
       - name: Build
         shell: pwsh
-        run: cmake --build build --config ${{ matrix.build_type }}
+        run: |
+          cmake --build "$env:GITHUB_WORKSPACE\build" --config Release --clean-first
+
+      - name: Verify DLL imports
+        shell: pwsh
+        run: |
+          $dllPath = "$env:GITHUB_WORKSPACE\build\bin\Release\EOSSDK-Win64-Shipping.dll"
+          if (Test-Path $dllPath) {
+            python -c "import pefile; pe=pefile.PE(r'$dllPath'); deps=[e.dll.decode() for e in pe.DIRECTORY_ENTRY_IMPORT]; print('IMPORTS:', ', '.join(sorted(deps)))"
+          } else {
+            Write-Error "DLL not found at $dllPath"
+            exit 1
+          }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.arch }}-${{ matrix.build_type }}
+          name: EOSSDK-Win64-Shipping
           path: |
-            build/**/*.exe
+            build/bin/Release/EOSSDK-Win64-Shipping.dll
             build/**/*.dll
-            build/**/*.lib
-          if-no-files-found: warn
