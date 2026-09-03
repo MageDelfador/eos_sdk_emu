@@ -30,11 +30,6 @@ jobs:
           VCPKG_TARGET_TRIPLET: ${{ matrix.arch }}-windows-static
           VCPKG_BINARY_SOURCES: 'clear'
 
-      - name: Regenerate EOS stubs
-        shell: pwsh
-        run: |
-          python tools/generate_eos_stubs.py
-
       - name: Configure CMake
         shell: pwsh
         env:
