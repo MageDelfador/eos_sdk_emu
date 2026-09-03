@@ -26,34 +26,24 @@ jobs:
       - name: Setup vcpkg
         shell: pwsh
         run: |
-          $vcpkgRoot = "C:\vcpkg"
+          $vcpkgRoot = "D:\vcpkg"
           if (-not (Test-Path $vcpkgRoot)) {
             git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
           }
           & "$vcpkgRoot\bootstrap-vcpkg.bat"
-          $env:PATH = "$vcpkgRoot;$env:PATH"
           echo "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
           echo "$vcpkgRoot" | Out-File -FilePath $env:GITHUB_PATH -Append
-
-      - name: Cache vcpkg packages
-        uses: actions/cache@v4
-        with:
-          path: C:\vcpkg\installed
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', '**/vcpkg.json') }}
-          restore-keys: |
-            ${{ runner.os }}-vcpkg-
 
       - name: Setup MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
-      - name: Install protobuf static
+      - name: Install dependencies
         shell: pwsh
         run: |
-          vcpkg remove abseil:x64-windows-static utf8-range:x64-windows-static protobuf:x64-windows-static --recurse
-          vcpkg install protobuf:x64-windows-static --recurse --binarysource=clear
-          vcpkg list | Select-String "protobuf"
+          vcpkg remove abseil:x64-windows-static utf8-range:x64-windows-static protobuf:x64-windows-static nlohmann-json:x64-windows-static --recurse
+          vcpkg install protobuf:x64-windows-static nlohmann-json:x64-windows-static --recurse --binarysource=clear
 
       - name: Configure CMake (Ninja)
         shell: pwsh
@@ -69,7 +59,7 @@ jobs:
                 -G "Ninja" `
                 -DCMAKE_BUILD_TYPE=Release `
                 -DX64=ON `
-                "-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+                "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
                 "-DVCPKG_TARGET_TRIPLET=x64-windows-static"
 
       - name: Build
