@@ -23,24 +23,39 @@ jobs:
       - name: Install pefile
         run: pip install pefile
 
-      - name: Setup vcpkg
+      - name: Locate Visual Studio and vcpkg
         shell: pwsh
         run: |
-          $vcpkgRoot = "C:\vcpkg"
-          if (-not (Test-Path $vcpkgRoot)) {
-            git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -version "[17.0,18.0)" -property installationPath
+          if (-not $vsPath) {
+            Write-Error "Visual Studio 2022 with C++ tools not found"
+            exit 1
           }
-          & "$vcpkgRoot\bootstrap-vcpkg.bat"
-          echo "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
-          echo "$vcpkgRoot" | Out-File -FilePath $env:GITHUB_PATH -Append
+          echo "VS_INSTALL_PATH=$vsPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          $vsVcpkgRoot = Join-Path $vsPath "VC\vcpkg"
+          echo "VS_VCPKG_ROOT=$vsVcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "VCPKG_ROOT=$vsVcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "$vsVcpkgRoot" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+          Write-Host "Visual Studio 2022 found at: $vsPath"
+          Write-Host "VS bundled vcpkg at: $vsVcpkgRoot"
+
+          if (-not (Test-Path (Join-Path $vsVcpkgRoot "vcpkg.exe"))) {
+            Write-Host "Bootstrapping vcpkg..."
+            & (Join-Path $vsVcpkgRoot "bootstrap-vcpkg.bat")
+          } else {
+            Write-Host "vcpkg already bootstrapped."
+          }
 
       - name: Cache vcpkg packages
         uses: actions/cache@v4
         with:
-          path: C:\vcpkg\installed
-          key: ${{ runner.os }}-vcpkg-c-${{ hashFiles('vcpkg.json', '**/vcpkg.json') }}
+          path: ${{ env.VS_VCPKG_ROOT }}/installed
+          key: ${{ runner.os }}-vsvcpkg-${{ hashFiles('vcpkg.json', '**/vcpkg.json') }}
           restore-keys: |
-            ${{ runner.os }}-vcpkg-c-
+            ${{ runner.os }}-vsvcpkg-
 
       - name: Setup MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
@@ -53,8 +68,6 @@ jobs:
           vcpkg remove protobuf:x64-windows-static --recurse
           vcpkg install protobuf:x64-windows-static
           vcpkg list
-          Write-Host "Protobuf config files:"
-          Get-ChildItem -Path "C:\vcpkg\installed\x64-windows-static\share\protobuf" -Filter "*config*" -Recurse | Select-Object FullName
 
       - name: Configure CMake
         shell: pwsh
@@ -65,8 +78,8 @@ jobs:
           }
           New-Item -ItemType Directory -Path $buildDir | Out-Null
 
-          Write-Host "VCPKG_ROOT = $env:VCPKG_ROOT"
-          Write-Host "GITHUB_WORKSPACE = $env:GITHUB_WORKSPACE"
+          $protobufDir = "$env:VS_VCPKG_ROOT\installed\x64-windows-static\share\protobuf"
+          Write-Host "Protobuf_DIR = $protobufDir"
 
           cmake -S "$env:GITHUB_WORKSPACE" `
                 -B $buildDir `
@@ -74,10 +87,7 @@ jobs:
                 -A x64 `
                 -DX64=ON `
                 -DCMAKE_BUILD_TYPE=Release `
-                "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
-                "-DVCPKG_TARGET_TRIPLET=x64-windows-static" `
-                "-DProtobuf_DIR=$env:VCPKG_ROOT/installed/x64-windows-static/share/protobuf" `
-                "-DCMAKE_PREFIX_PATH=$env:VCPKG_ROOT/installed/x64-windows-static"
+                "-DProtobuf_DIR=$protobufDir"
 
       - name: Build
         shell: pwsh
