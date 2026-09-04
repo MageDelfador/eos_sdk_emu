@@ -130,14 +130,6 @@ void apply_gamename_from_product(char const* product_name)
         settings.gamename.c_str(), game_name.c_str());
 
     settings.gamename = game_name;
-    try
-    {
-        settings.save_settings();
-    }
-    catch (...)
-    {
-        APP_LOG(Log::LogLevel::WARN, "save_settings failed while updating gamename");
-    }
 }
 
 } // namespace

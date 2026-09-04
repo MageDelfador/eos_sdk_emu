@@ -24,8 +24,8 @@
 
 namespace
 {
-    constexpr char default_custom_broadcast[] = "172.20.0.0/22";
-    constexpr char default_language[] = "ru";
+    constexpr char default_custom_broadcast[] = "";
+    constexpr char default_language[] = "zh";
 
     bool is_epic_account_id(std::string const& id)
     {
@@ -250,7 +250,8 @@ void Settings::load_settings()
         return true;
     };
 
-    if (!try_load(module_dir) && !try_load(exe_dir) && !try_load(appdata_dir))
+	try_load(appdata_dir);
+    if (!try_load(module_dir) && !try_load(exe_dir))
         default_config = true;
 
     if (!appdata_dir.empty())
@@ -443,27 +444,40 @@ void Settings::apply_runtime_product_id(std::string const& product_id)
 
 void Settings::save_settings()
 {
-    if (config_path.empty() || userid == nullptr || productuserid == nullptr)
+	std::string const last_settings_config = FileManager::join(appdata_dir, "last_config.json");
+    nlohmann::json last_settings;
+    APP_LOG(Log::LogLevel::INFO, "Saving lastest emu settings: %s", last_settings_config.c_str());
+
+    last_settings["appid"]                     = appid;
+    last_settings["username"]                  = username;
+    last_settings["epicid"]                    = userid->to_string();
+    last_settings["productuserid"]             = productuserid->to_string();
+    last_settings["language"]                  = language;
+    last_settings["gamename"]                  = gamename;
+    last_settings["unlock_dlcs"]               = unlock_dlcs;
+    last_settings["disable_online_networking"] = disable_online_networking;
+    last_settings["steam_passthrough"]         = steam_passthrough;
+#ifndef DISABLE_LOG
+    last_settings["log_level"]                 = Log::loglevel_to_str();
+#endif
+    last_settings["custom_broadcast"]          = custom_broadcast;
+    last_settings["savepath"]                  = savepath;
+	
+    FileManager::create_directory(FileManager::dirname(last_settings_config));
+    save_json(last_settings_config, last_settings);
+	
+    if (!appdata_dir.empty())
         return;
 
     nlohmann::json settings;
-    APP_LOG(Log::LogLevel::INFO, "Saving emu settings: %s", config_path.c_str());
+    APP_LOG(Log::LogLevel::INFO, "Saving base settings: %s", appdata_config.c_str());
 
-    settings["appid"]                     = appid;
     settings["username"]                  = username;
     settings["epicid"]                    = userid->to_string();
     settings["productuserid"]             = productuserid->to_string();
     settings["language"]                  = language;
-    settings["gamename"]                  = gamename;
-    settings["unlock_dlcs"]               = unlock_dlcs;
-    settings["disable_online_networking"] = disable_online_networking;
-    settings["steam_passthrough"]         = steam_passthrough;
-#ifndef DISABLE_LOG
-    settings["log_level"]                 = Log::loglevel_to_str();
-#endif
-    settings["custom_broadcast"]          = custom_broadcast;
-    settings["savepath"]                  = savepath;
 
-    FileManager::create_directory(FileManager::dirname(config_path));
-    save_json(config_path, settings);
+    FileManager::create_directory(FileManager::dirname(appdata_config));
+    save_json(appdata_config, settings);
+	
 }
