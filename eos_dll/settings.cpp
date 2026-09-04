@@ -468,7 +468,7 @@ void Settings::save_settings()
     FileManager::create_directory(FileManager::dirname(last_settings_config));
     save_json(last_settings_config, last_settings);
 	
-    if (!appdata_dir.empty())
+    if (std::filesystem::exists(appdata_config))
         return;
 
     nlohmann::json settings;

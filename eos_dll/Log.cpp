@@ -28,7 +28,7 @@ static std::ofstream& emu_log_file()
     static std::ofstream file;
     static std::once_flag once;
     std::call_once(once, []() {
-        std::string const log_dir = get_module_path();
+        std::string const log_dir = FileManager::dirname(get_module_path());
         file.open(FileManager::join(log_dir, "NemirtingasEpicEmu.log"), std::ios::out | std::ios::app);
     });
     return file;
