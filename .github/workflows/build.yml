@@ -47,12 +47,12 @@ jobs:
         with:
           arch: x64
 
-      - name: Install protobuf static
+      - name: Install dependencies
         shell: pwsh
         run: |
           Set-Location C:\
-          & "C:\vcpkg\vcpkg.exe" remove protobuf:x64-windows-static --recurse
-          & "C:\vcpkg\vcpkg.exe" install protobuf:x64-windows-static
+          & "C:\vcpkg\vcpkg.exe" remove protobuf:x64-windows-static nlohmann-json:x64-windows-static --recurse
+          & "C:\vcpkg\vcpkg.exe" install protobuf:x64-windows-static nlohmann-json:x64-windows-static
           & "C:\vcpkg\vcpkg.exe" list
 
       - name: Configure CMake
@@ -63,9 +63,6 @@ jobs:
             Remove-Item -Recurse -Force $buildDir
           }
           New-Item -ItemType Directory -Path $buildDir | Out-Null
-
-          Write-Host "VCPKG_ROOT = $env:VCPKG_ROOT"
-          Write-Host "Toolchain file = C:\vcpkg\scripts\buildsystems\vcpkg.cmake"
 
           cmake -S "$env:GITHUB_WORKSPACE" `
                 -B $buildDir `
