@@ -444,6 +444,8 @@ void Settings::apply_runtime_product_id(std::string const& product_id)
 
 void Settings::save_settings()
 {
+	std::string const appdata_dir = FileManager::join(get_userdata_path(), emu_savepath);
+	std::string const appdata_config = FileManager::join(appdata_dir, settings_file_name);
 	std::string const last_settings_config = FileManager::join(appdata_dir, "last_config.json");
     nlohmann::json last_settings;
     APP_LOG(Log::LogLevel::INFO, "Saving lastest emu settings: %s", last_settings_config.c_str());
