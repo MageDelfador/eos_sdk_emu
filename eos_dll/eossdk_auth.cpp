@@ -137,9 +137,20 @@ void EOSSDK_Auth::Login(const EOS_Auth_LoginOptions* Options, void* ClientData, 
 
         std::function<void(void*)> intermediate_callback = [this, ClientData, CompletionDelegate](void* param) {
             _logged_in = true;
+            auto notifs = GetCB_Manager().get_notifications(this, EOS_Auth_LoginStatusChangedCallbackInfo::k_iCallback);
+            for (auto& notif : notifs)
+            {
+                EOS_Auth_LoginStatusChangedCallbackInfo& info = notif->GetCallback<EOS_Auth_LoginStatusChangedCallbackInfo>();
+                info.LocalUserId = Settings::Inst().userid;
+                info.PrevStatus = EOS_ELoginStatus::EOS_LS_NotLoggedIn;
+                info.CurrentStatus = EOS_ELoginStatus::EOS_LS_LoggedIn;
+                notif->done = true;
+                GetCB_Manager().add_callback(this, notif);
+            }
+
             EOS_Auth_LoginCallbackInfo* cb_info = (EOS_Auth_LoginCallbackInfo*)param;
             CompletionDelegate(cb_info);
-        };
+            };
         EOS_Auth_LoginCallbackInfo& lci = res->CreateCallback<EOS_Auth_LoginCallbackInfo>(intermediate_callback, std::chrono::milliseconds(1000));
 
         lci.ResultCode = EOS_EResult::EOS_Success;
